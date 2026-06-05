@@ -105,7 +105,7 @@ alerts:
   github_repo: "pcctradinginc-alt/Thiel-Monopolist-Detektor"
 
 eu_universe:
-  enabled: false                  # Auf true setzen wenn Eulerpool API Key gesetzt
+  enabled: true                   # EU-Universe aktiv (yfinance Pre-Filter + Bundesanzeiger)
   exchanges:
     - xetra                       # XETRA (DE): DAX/MDAX/SDAX/TecDAX + weitere
     - six                         # SIX Swiss Exchange (CH)

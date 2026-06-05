@@ -105,6 +105,9 @@ jobs:
           EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
           EMAIL_RECIPIENT: ${{ secrets.EMAIL_RECIPIENT }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          WEBHOOK_SECRET: ${{ secrets.WEBHOOK_SECRET }}
+          WORKER_URL: ${{ secrets.WORKER_URL }}
+          GITHUB_REPO: pcctradinginc-alt/Thiel-Monopolist-Detektor
           MANUAL_BATCH_ID: ${{ github.event.inputs.batch_id }}
         run: |
           mkdir -p data logs

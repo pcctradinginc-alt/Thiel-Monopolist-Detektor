@@ -86,7 +86,8 @@ def should_send_alert(
     return True, f"All thresholds met — alert type: {alert_type}"
 
 
-def format_email_html(ticker: str, assessment: dict, filing_data: dict, hypotheses: dict) -> str:
+def format_email_html(ticker: str, assessment: dict, filing_data: dict, hypotheses: dict,
+                      issue_number: int = None) -> str:
     """Format alert email in clean Apple-style design."""
     scores      = assessment.get("scores", {})
     alert_type  = assessment.get("alert_type", "UNKNOWN")
@@ -104,6 +105,50 @@ def format_email_html(ticker: str, assessment: dict, filing_data: dict, hypothes
     primary           = narrow_markets[0] if narrow_markets else {}
     claimed_market    = hypotheses.get("company_claimed_market", "—")
     filing_date       = filing_data.get("filing_date", "—")
+
+    # Feedback buttons (only if issue_number and worker URL are available)
+    from alerts.feedback_links import make_feedback_links
+    feedback_html = ""
+    if issue_number:
+        links = make_feedback_links(issue_number)
+        if links:
+            repo = os.environ.get("GITHUB_REPO",
+                "pcctradinginc-alt/Thiel-Monopolist-Detektor")
+            issue_url = f"https://github.com/{repo}/issues/{issue_number}"
+            feedback_html = f"""
+    <tr><td style="height:12px;"></td></tr>
+    <tr>
+      <td style="background:#ffffff; border-radius:16px; padding:24px 28px;
+                 box-shadow:0 1px 3px rgba(0,0,0,.08);">
+        <p style="margin:0 0 16px 0; font-size:11px; font-weight:600; color:#86868b;
+                  text-transform:uppercase; letter-spacing:0.06em;">Deine Einschätzung</p>
+        <table width="100%" cellpadding="0" cellspacing="0"><tr>
+          <td style="padding:0 4px 0 0;">
+            <a href="{links['confirmed']}" style="display:block; text-align:center;
+               background:#34c759; color:white; text-decoration:none; font-size:13px;
+               font-weight:600; padding:10px 0; border-radius:8px;">✓ Bestätigt</a>
+          </td>
+          <td style="padding:0 4px;">
+            <a href="{links['rejected']}" style="display:block; text-align:center;
+               background:#ff3b30; color:white; text-decoration:none; font-size:13px;
+               font-weight:600; padding:10px 0; border-radius:8px;">✗ Abgelehnt</a>
+          </td>
+          <td style="padding:0 4px;">
+            <a href="{links['watchlist']}" style="display:block; text-align:center;
+               background:#0071e3; color:white; text-decoration:none; font-size:13px;
+               font-weight:600; padding:10px 0; border-radius:8px;">👁 Watchlist</a>
+          </td>
+          <td style="padding:0 0 0 4px;">
+            <a href="{links['too-early']}" style="display:block; text-align:center;
+               background:#f0a500; color:white; text-decoration:none; font-size:13px;
+               font-weight:600; padding:10px 0; border-radius:8px;">⏳ Zu früh</a>
+          </td>
+        </tr></table>
+        <p style="margin:12px 0 0 0; font-size:11px; color:#86868b; text-align:center;">
+          <a href="{issue_url}" style="color:#86868b;">Issue #{issue_number} auf GitHub öffnen →</a>
+        </p>
+      </td>
+    </tr>"""
 
     # Score ring colour: blue ≥75, amber 55–74, gray <55
     def ring_color(s):
@@ -273,6 +318,8 @@ def format_email_html(ticker: str, assessment: dict, filing_data: dict, hypothes
       </td>
     </tr>
 
+    {feedback_html}
+
     <tr><td style="height:12px;"></td></tr>
 
     <!-- Footer -->
@@ -298,7 +345,8 @@ def send_email_alert(
     assessment: dict,
     filing_data: dict,
     hypotheses: dict,
-    config: dict
+    config: dict,
+    issue_number: int = None,
 ) -> bool:
     """Send HTML email alert via Gmail SMTP."""
     sender = os.environ.get("EMAIL_SENDER")
@@ -319,7 +367,7 @@ def send_email_alert(
     msg["From"] = sender
     msg["To"] = recipient
 
-    html_content = format_email_html(ticker, assessment, filing_data, hypotheses)
+    html_content = format_email_html(ticker, assessment, filing_data, hypotheses, issue_number)
     msg.attach(MIMEText(html_content, "html"))
 
     try:
@@ -466,13 +514,15 @@ def process_alerts(
         outcome["dry_run"] = True
         return outcome
 
-    # Send email
-    outcome["email_sent"] = send_email_alert(ticker, assessment, filing_data, hypotheses, config)
-
-    # Create GitHub Issue
+    # Create GitHub Issue first (so we have the issue number for email buttons)
+    issue_number = None
     if config.get("alerts", {}).get("create_github_issues", True):
-        outcome["github_issue"] = create_github_issue(
-            ticker, assessment, filing_data, hypotheses, config
-        )
+        issue_number = create_github_issue(ticker, assessment, filing_data, hypotheses, config)
+        outcome["github_issue"] = issue_number
+
+    # Send email with feedback buttons linked to the issue
+    outcome["email_sent"] = send_email_alert(
+        ticker, assessment, filing_data, hypotheses, config, issue_number=issue_number
+    )
 
     return outcome

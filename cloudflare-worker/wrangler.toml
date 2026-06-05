@@ -1,0 +1,10 @@
+name = "thiel-feedback"
+main = "worker.js"
+compatibility_date = "2024-01-01"
+
+[vars]
+GITHUB_REPO = "pcctradinginc-alt/Thiel-Monopolist-Detektor"
+
+# Secrets (via `wrangler secret put`):
+#   GITHUB_TOKEN    — GitHub Personal Access Token (repo scope)
+#   WEBHOOK_SECRET  — beliebiger geheimer String, z.B. `openssl rand -hex 32`
