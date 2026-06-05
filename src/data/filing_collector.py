@@ -243,17 +243,40 @@ def _extract_10k_sections(filing, result: dict):
         tenk = filing.obj()
         if not tenk:
             return
-        item1 = _safe_get_attr(tenk, "business", "item_1", "Item 1")
+        # Try new parser attribute names first, then legacy fallbacks
+        item1 = _safe_get_attr(tenk,
+            "business",           # edgartools v5 new parser
+            "part_i_item_1",      # new parser section key
+            "item_1", "Item 1",   # legacy
+        )
         if item1:
             result["business_description"] = _truncate(item1, 4000)
 
-        item1a = _safe_get_attr(tenk, "risk_factors", "item_1a", "Item 1A")
+        item1a = _safe_get_attr(tenk,
+            "risk_factors",
+            "part_i_item_1a",
+            "item_1a", "Item 1A",
+        )
         if item1a:
             result["risk_factors"] = _truncate(item1a, 2000)
 
-        item7 = _safe_get_attr(tenk, "management_discussion", "item_7", "Item 7")
+        item7 = _safe_get_attr(tenk,
+            "management_discussion",
+            "part_ii_item_7",
+            "item_7", "Item 7",
+        )
         if item7:
             result["mda"] = _truncate(item7, 2000)
+
+        # Last resort: use get_item_with_part if available
+        if not result["business_description"] and hasattr(tenk, "get_item_with_part"):
+            try:
+                text = tenk.get_item_with_part("1", "I")
+                if text and len(str(text)) > 100:
+                    result["business_description"] = _truncate(str(text), 4000)
+            except Exception:
+                pass
+
     except Exception as e:
         logger.warning(f"10-K section extraction failed: {e}")
 
