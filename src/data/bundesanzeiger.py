@@ -23,7 +23,7 @@ BASE_URL = "https://www.bundesanzeiger.de"
 SEARCH_URL = f"{BASE_URL}/pub/de/suche"
 
 HEADERS = {
-    "User-Agent": "ThielDetector contact@example.com",
+    "User-Agent": "ThielDetector info@pcctradinginc.com",
     "Accept-Language": "de-DE,de;q=0.9",
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
 }

@@ -76,7 +76,7 @@ CAMOUFLAGE_KEYWORDS = [
 def set_edgar_identity():
     """Set required identity for SEC EDGAR API calls."""
     if EDGAR_AVAILABLE:
-        set_identity("ThielDetector contact@example.com")
+        set_identity("ThielDetector info@pcctradinginc.com")
 
 
 def fetch_filing_data(ticker: str, cik: str = None) -> dict:

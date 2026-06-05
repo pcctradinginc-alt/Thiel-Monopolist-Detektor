@@ -63,7 +63,7 @@ def fetch_universe_via_edgar() -> list[dict]:
     This is the most stable free source — SEC has no rate limits on this endpoint.
     """
     url = "https://www.sec.gov/files/company_tickers.json"
-    headers = {"User-Agent": "ThielDetector contact@example.com"}
+    headers = {"User-Agent": "ThielDetector info@pcctradinginc.com"}
 
     try:
         resp = requests.get(url, headers=headers, timeout=30)
@@ -95,7 +95,7 @@ def fetch_recent_ipos(months_back: int = 36) -> list[dict]:
         "forms": "S-1",
         "_source": "hits.hits._source"
     }
-    headers = {"User-Agent": "ThielDetector contact@example.com"}
+    headers = {"User-Agent": "ThielDetector info@pcctradinginc.com"}
 
     try:
         resp = requests.get(

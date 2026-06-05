@@ -2,8 +2,8 @@ name: Weekly Thiel Screening
 
 on:
   schedule:
-    - cron: "0 19 * * 0"   # Sonntag 19:00 UTC → batch_submit
-    - cron: "0 7 * * 1"    # Montag  07:00 UTC → batch_collect + alerts
+    - cron: "0 6 * * 0"    # Sonntag 06:00 UTC → batch_submit
+    - cron: "0 12 * * 0"   # Sonntag 12:00 UTC → batch_collect + alerts (6h Puffer)
   workflow_dispatch:
     inputs:
       mode:
@@ -24,7 +24,7 @@ jobs:
     runs-on: ubuntu-latest
     if: |
       github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'batch_submit' ||
-      github.event_name == 'schedule' && startsWith(github.event.schedule, '0 19')
+      github.event_name == 'schedule' && startsWith(github.event.schedule, '0 6')
     steps:
       - uses: actions/checkout@v4
 
@@ -59,7 +59,7 @@ jobs:
     runs-on: ubuntu-latest
     if: |
       github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'batch_collect' ||
-      github.event_name == 'schedule' && startsWith(github.event.schedule, '0 7')
+      github.event_name == 'schedule' && startsWith(github.event.schedule, '0 12')
     steps:
       - uses: actions/checkout@v4
 
