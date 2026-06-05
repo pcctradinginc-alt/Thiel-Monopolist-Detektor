@@ -107,11 +107,16 @@ alerts:
 eu_universe:
   enabled: true                   # EU-Universe aktiv (yfinance Pre-Filter + Bundesanzeiger)
   exchanges:
-    - xetra                       # XETRA (DE): live DAX/MDAX/SDAX/TecDAX + Seeds
-    - six                         # SIX Swiss Exchange (CH)
-    - aex                         # Euronext Amsterdam (NL)
-    - vienna                      # Wiener Börse (AT)
+    - xetra                       # XETRA (DE): DAX/MDAX/SDAX/TecDAX + Hidden Champions
+    - six                         # SIX Swiss Exchange (CH): SMI + SMIM
+    - aex                         # Euronext Amsterdam (NL): AEX + AMX + AScX
+    - vienna                      # Wiener Börse (AT): ATX Prime
     - paris                       # Euronext Paris (FR): CAC40 + SBF120
+    - omxs                        # OMX Stockholm (SE): many Hidden Champions
+    - omxh                        # OMX Helsinki (FI)
+    - omxc                        # OMX Copenhagen (DK): Novo, Coloplast, GN
+    - ose                         # Oslo Stock Exchange (NO)
+    - bru                         # Euronext Brussels (BE): Barco, Melexis etc.
   min_market_cap_m: 50            # Small Caps einschließen (€50M+)
   ipo_months_back: 18             # EU-IPOs der letzten N Monate screenen
   eulerpool_api_key_env: "EULERPOOL_API_KEY"

@@ -228,6 +228,61 @@ VIENNA_SEEDS = [
 
 # ─── Exchange Configuration ──────────────────────────────────────────────────
 
+NORDIC_SEEDS = [
+    # OMX Stockholm — Sweden has many Hidden Champions (Addtech, Lagercrantz etc.)
+    ("ADDTECH-B", "Addtech AB"),       ("LAGERCRANTZ-B", "Lagercrantz Group AB"),
+    ("INDUTRADE", "Indutrade AB"),     ("LIFCO-B", "Lifco AB"),
+    ("NIBE-B", "NIBE Industrier AB"),  ("HEXAGON-B", "Hexagon AB"),
+    ("ALFA", "Alfa Laval AB"),         ("ASSA-B", "ASSA ABLOY AB"),
+    ("ATCO-A", "Atlas Copco AB"),      ("EPIROC-A", "Epiroc AB"),
+    ("EVO", "Evolution AB"),           ("SWECO-B", "Sweco AB"),
+    ("NENT-B", "NENT Group AB"),       ("SINCH", "Sinch AB"),
+    ("TOBII", "Tobii AB"),             ("EMBRACER", "Embracer Group AB"),
+    ("BONESUPPORT", "BoneSupport AB"), ("CELLINK", "BICO Group AB"),
+    ("VITROLIFE", "Vitrolife AB"),     ("IMMUNOVIA", "Immunovia AB"),
+    ("RAYSEARCH-B", "RaySearch AB"),   ("PROBI", "Probi AB"),
+    ("FORTNOX", "Fortnox AB"),         ("VISMA", "Visma AS"),
+    ("LIME", "Lime Technologies AB"),  ("AGILLIC", "Agillic A/S"),
+    # OMX Helsinki — Finland
+    ("NOKIA", "Nokia Oyj"), ("KONE", "KONE Oyj"), ("SAMPO", "Sampo Oyj"),
+    ("NESTE", "Neste Oyj"), ("UPM", "UPM-Kymmene Oyj"),
+    ("METSO", "Metso Outotec Oyj"), ("WARTSILA", "Wartsila Oyj"),
+    ("TIETOEVRY", "TietoEVRY Oyj"), ("TOKMANNI", "Tokmanni Group Oyj"),
+    ("REVENIO", "Revenio Group Oyj"), ("ENEDO", "Enedo Oyj"),
+    # OMX Copenhagen — Denmark
+    ("NOVO-B", "Novo Nordisk A/S"), ("ORSTED", "Orsted A/S"),
+    ("COLOPLAST-B", "Coloplast A/S"), ("DSV", "DSV A/S"),
+    ("DEMANT", "Demant A/S"), ("GN", "GN Store Nord A/S"),
+    ("AMBU-B", "Ambu A/S"), ("ROCKWOOL-B", "Rockwool A/S"),
+    ("VESTAS", "Vestas Wind Systems A/S"), ("SIMCORP", "SimCorp A/S"),
+    ("NNIT", "NNIT A/S"), ("NETCOMPANY", "Netcompany Group A/S"),
+    # Oslo — Norway
+    ("EQNR", "Equinor ASA"), ("DNB", "DNB Bank ASA"),
+    ("MOWI", "Mowi ASA"), ("TOMRA", "TOMRA Systems ASA"),
+    ("KAHOOT", "Kahoot AS"), ("VISTIN", "Vistin Pharma ASA"),
+    ("IDEX", "IDEX Biometrics ASA"), ("NORDIC-SEMI", "Nordic Semiconductor ASA"),
+    ("TELENOR", "Telenor ASA"), ("AUTOSTORE", "AutoStore Holdings Ltd"),
+    ("ORDORO", "Ordoro AS"),
+]
+
+BENELUX_EXTRA_SEEDS = [
+    # BEL20 + additional Belgian/Luxembourg companies
+    ("AB-INBEV", "Anheuser-Busch InBev SA"),
+    ("UCB", "UCB SA"), ("AGS", "Ageas SA"),
+    ("BEKAERT", "Bekaert SA"), ("COLRUYT", "Colruyt SA"),
+    ("ELIA", "Elia Group SA"), ("GBL", "Groupe Bruxelles Lambert SA"),
+    ("MELEXIS", "Melexis NV"), ("SOFINA", "Sofina SA"),
+    ("LOTUS-BAKERIES", "Lotus Bakeries NV"),
+    ("RECTICEL", "Recticel NV"), ("SOLVAY", "Solvay SA"),
+    ("TINC", "TINC Comm VA"), ("XIOR", "Xior Student Housing NV"),
+    # Strong Belgian tech/niche
+    ("BARCO", "Barco NV"),         # Professional display systems
+    ("ECONOCOM", "Econocom Group SE"),
+    ("EVS", "EVS Broadcast Equipment SA"),  # Live video production
+    ("OPTION", "Option NV"),
+    ("PICANOL", "Picanol NV"),     # Weaving machines, global leader
+]
+
 EXCHANGES = {
     "xetra": {
         "suffix": ".DE",
@@ -252,6 +307,41 @@ EXCHANGES = {
         "seeds": VIENNA_SEEDS,
         "min_market_cap_m": 30,
         "country": "AT",
+    },
+    "omxs": {
+        "suffix": ".ST",
+        "seeds": [(t, n) for t, n in NORDIC_SEEDS if not any(
+            t.endswith(x) for x in ["-A", "-B", "KET", "SEMI"])
+            or t.endswith(("-A", "-B"))],
+        "min_market_cap_m": 30,
+        "country": "SE",
+    },
+    "omxh": {
+        "suffix": ".HE",
+        "seeds": [(t, n) for t, n in NORDIC_SEEDS if any(
+            n_check in n for n_check in ["Oyj", "Finland"])],
+        "min_market_cap_m": 30,
+        "country": "FI",
+    },
+    "omxc": {
+        "suffix": ".CO",
+        "seeds": [(t, n) for t, n in NORDIC_SEEDS if any(
+            n_check in n for n_check in ["A/S", "Denmark"])],
+        "min_market_cap_m": 30,
+        "country": "DK",
+    },
+    "ose": {
+        "suffix": ".OL",
+        "seeds": [(t, n) for t, n in NORDIC_SEEDS if any(
+            n_check in n for n_check in ["ASA", "Norway", "AS"])],
+        "min_market_cap_m": 20,
+        "country": "NO",
+    },
+    "bru": {
+        "suffix": ".BR",
+        "seeds": BENELUX_EXTRA_SEEDS,
+        "min_market_cap_m": 30,
+        "country": "BE",
     },
     "paris": {
         "suffix": ".PA",

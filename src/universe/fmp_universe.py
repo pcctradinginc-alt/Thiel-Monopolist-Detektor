@@ -19,25 +19,42 @@ logger = logging.getLogger(__name__)
 
 FMP_BASE = "https://financialmodelingprep.com/api/v3"
 
-# FMP exchange short names → our exchange IDs + yfinance suffixes
+# FMP exchange short names → (exchange_id, yfinance_suffix, country)
+# Covers all major European markets including Nordics, Benelux, DACH
 EXCHANGE_MAP = {
-    "XETRA":    ("xetra",  ".DE", "DE"),
-    "EURONEXT": ("aex",    ".AS", "NL"),  # Euronext Amsterdam default
-    "SIX":      ("six",    ".SW", "CH"),
-    "VSE":      ("vienna", ".VI", "AT"),
-    "EPA":      ("paris",  ".PA", "FR"),  # Euronext Paris
-    "BRU":      ("bru",    ".BR", "BE"),  # Euronext Brussels
-    "LSE":      ("lse",    ".L",  "GB"),  # London Stock Exchange
+    # DACH
+    "XETRA":    ("xetra",   ".DE", "DE"),
+    "FRA":      ("xetra",   ".DE", "DE"),   # Frankfurt = XETRA fallback
+    "BER":      ("xetra",   ".DE", "DE"),   # Berlin
+    "STU":      ("xetra",   ".DE", "DE"),   # Stuttgart
+    "MUN":      ("xetra",   ".DE", "DE"),   # Munich
+    "HAM":      ("xetra",   ".DE", "DE"),   # Hamburg
+    "SIX":      ("six",     ".SW", "CH"),
+    "VSE":      ("vienna",  ".VI", "AT"),
+    # Benelux
+    "EURONEXT": ("aex",     ".AS", "NL"),
+    "AMS":      ("aex",     ".AS", "NL"),
+    "EPA":      ("paris",   ".PA", "FR"),
+    "BRU":      ("bru",     ".BR", "BE"),
+    "LIS":      ("lse",     ".LS", "PT"),   # Euronext Lisbon
+    # Nordics — many Hidden Champions here
+    "STO":      ("omxs",    ".ST", "SE"),   # OMX Stockholm
+    "HEL":      ("omxh",    ".HE", "FI"),   # OMX Helsinki
+    "CPH":      ("omxc",    ".CO", "DK"),   # OMX Copenhagen
+    "OSL":      ("ose",     ".OL", "NO"),   # Oslo Stock Exchange
+    "ICE":      ("ice",     ".IC", "IS"),   # Iceland
+    # UK + Ireland
+    "LSE":      ("lse",     ".L",  "GB"),
+    "AIM":      ("aim",     ".L",  "GB"),   # AIM — many UK small caps
+    "ISE":      ("ise",     ".IR", "IE"),   # Irish Stock Exchange
+    # Southern Europe
+    "MCE":      ("bme",     ".MC", "ES"),   # Madrid (IBEX35)
+    "MIL":      ("mil",     ".MI", "IT"),   # Milan (FTSE MIB)
+    "ATH":      ("ath",     ".AT", "GR"),   # Athens
+    "WAR":      ("gpw",     ".WA", "PL"),   # Warsaw (WIG20)
+    "BUD":      ("bse",     ".BD", "HU"),   # Budapest
+    "PRA":      ("pse",     ".PR", "CZ"),   # Prague
 }
-
-# Sectors to exclude (commodity, no Thiel moat possible)
-EXCLUDED_SECTORS = {
-    "Energy", "Utilities", "Basic Materials", "Real Estate",
-    "Consumer Staples", "Industrials",  # narrow Industrials exclusion
-}
-
-# Minimum market cap in USD (FMP reports in USD)
-MIN_MARKET_CAP_USD = 40_000_000  # ~€37M
 
 
 def fetch_fmp_eu_universe(api_key: str = None) -> list[dict]:
