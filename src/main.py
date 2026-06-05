@@ -29,7 +29,7 @@ sys.path.insert(0, str(ROOT / "src"))
 from db.database import get_connection, seed_cohorts
 from universe.universe_builder import build_universe
 from universe.eu_universe_builder import build_eu_universe
-from data.filing_collector import fetch_filing_data, compute_lane_scores as compute_lanes
+from data.filing_collector import fetch_filing_data, fetch_eu_filing_data, compute_lane_scores as compute_lanes
 from data.eu_prefilter import batch_prefilter
 from analysis.llm_analyzer import analyze_company
 from alerts.alert_manager import process_alerts
@@ -279,11 +279,15 @@ def run_screening(config: dict, conn, run_id: str, dry_run: bool = False,
                 logger.warning(f"LLM call budget ({max_calls}) reached — stopping")
                 break
 
-            # Fetch filing data
-            filing_data = fetch_filing_data(
-                ticker,
-                cik=company.get("cik")
-            )
+            # Fetch filing data — EU companies use Bundesanzeiger, US uses EDGAR
+            if company.get("source") == "eu" or company.get("exchange"):
+                filing_data = fetch_eu_filing_data(
+                    ticker,
+                    company_name=company.get("name", ""),
+                    exchange=company.get("exchange", "xetra"),
+                )
+            else:
+                filing_data = fetch_filing_data(ticker, cik=company.get("cik"))
 
             if filing_data.get("error") and not filing_data.get("business_description"):
                 logger.warning(f"{ticker}: No usable data — skipping")

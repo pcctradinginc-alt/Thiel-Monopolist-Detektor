@@ -85,6 +85,7 @@ def yfinance_thiel_prefilter(ticker: str, exchange_suffix: str = "") -> dict:
         sector = info.get("sector", "")
         market_cap = info.get("marketCap", 0) or 0
 
+        insider_pct = info.get("heldPercentInsiders")
         result["signals"] = {
             "gross_margin": round(gross_margin * 100, 1) if gross_margin is not None else None,
             "operating_margin": round(operating_margin * 100, 1) if operating_margin is not None else None,
@@ -92,6 +93,9 @@ def yfinance_thiel_prefilter(ticker: str, exchange_suffix: str = "") -> dict:
             "free_cashflow_positive": (free_cashflow or 0) > 0,
             "sector": sector,
             "market_cap_m": round(market_cap / 1_000_000, 0),
+            # Family/founder ownership — DACH Hidden Champion signal
+            "insider_ownership_pct": round(insider_pct * 100, 1) if insider_pct is not None else None,
+            "family_owned": (insider_pct or 0) > 0.20,
         }
 
         # ── Disqualification checks ──────────────────────────────────────────

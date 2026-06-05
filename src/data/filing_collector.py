@@ -32,7 +32,7 @@ except ImportError:
     YFINANCE_AVAILABLE = False
 
 
-# Lock-in and moat keywords to search for in filings
+# Lock-in and moat keywords — English
 LOCK_IN_KEYWORDS = [
     "mission-critical", "system of record", "deeply embedded", "deeply integrated",
     "switching costs", "switching cost", "proprietary data", "proprietary technology",
@@ -44,14 +44,32 @@ LOCK_IN_KEYWORDS = [
     "deeply embedded", "mission critical", "business critical",
     "recurring revenue", "land and expand", "upsell", "cross-sell",
     "remaining performance obligations", "deferred revenue",
-    "customer concentration", "sole source", "single source"
+    "customer concentration", "sole source", "single source",
+]
+
+# German lock-in and moat keywords — DACH annual reports
+LOCK_IN_KEYWORDS_DE = [
+    "weltmarktführer", "marktführer", "nischenmarkt", "nischenanbieter",
+    "alleinstellungsmerkmal", "kundenbindung", "wiederkehrende umsätze",
+    "wiederkehrende erlöse", "switching costs", "wechselkosten",
+    "kritische infrastruktur", "geschäftskritisch", "systemkritisch",
+    "tief integriert", "tief verwurzelt", "proprietäre technologie",
+    "proprietäre daten", "betriebssystem für", "plattform",
+    "ökosystem", "marktplatz", "langfristige verträge",
+    "mehrjährige verträge", "hohe kundenbindung", "hohe retention",
+    "umsatzwachstum pro kunde", "cross-selling", "upselling",
+    "unverzichtbar", "kernprozess", "standard in der branche",
+    "de-facto-standard", "technologieführer", "innovationsführer",
 ]
 
 # Management camouflage keywords (signal of potential hidden moat)
 CAMOUFLAGE_KEYWORDS = [
     "highly competitive", "highly fragmented", "intense competition",
     "compete with large incumbents", "may not maintain growth",
-    "customers could develop internal alternatives", "well-funded competitors"
+    "customers could develop internal alternatives", "well-funded competitors",
+    # German equivalents
+    "intensiver wettbewerb", "stark fragmentiert", "starker wettbewerb",
+    "wettbewerbsintensiv", "große wettbewerber",
 ]
 
 
@@ -118,8 +136,9 @@ def fetch_filing_data(ticker: str, cik: str = None) -> dict:
             result["s1_text"]
         ).lower()
 
+        all_lock_in = LOCK_IN_KEYWORDS + LOCK_IN_KEYWORDS_DE
         result["lock_in_keyword_hits"] = [
-            kw for kw in LOCK_IN_KEYWORDS if kw.lower() in full_text
+            kw for kw in all_lock_in if kw.lower() in full_text
         ]
         result["camouflage_keyword_hits"] = [
             kw for kw in CAMOUFLAGE_KEYWORDS if kw.lower() in full_text
@@ -131,12 +150,89 @@ def fetch_filing_data(ticker: str, cik: str = None) -> dict:
         biz_lower = result["business_description"].lower()
         result["has_contradiction_signal"] = (
             any(kw.lower() in risk_lower for kw in CAMOUFLAGE_KEYWORDS) and
-            any(kw.lower() in biz_lower for kw in LOCK_IN_KEYWORDS[:10])
+            any(kw.lower() in biz_lower for kw in all_lock_in[:15])
         )
 
     except Exception as e:
         logger.error(f"Error fetching data for {ticker}: {e}")
         result["error"] = str(e)
+
+    return result
+
+
+def fetch_eu_filing_data(ticker: str, company_name: str, exchange: str = "xetra") -> dict:
+    """
+    Fetch filing data for a European company.
+
+    Strategy:
+      1. yfinance for financial signals (always)
+      2. Bundesanzeiger for text (DE companies)
+      3. Fallback: empty text (LLM will rely on financial signals only)
+    """
+    result = {
+        "ticker": ticker,
+        "cik": None,
+        "has_10k": False,
+        "has_s1": False,
+        "has_10q": False,
+        "business_description": "",
+        "risk_factors": "",
+        "mda": "",
+        "s1_text": "",
+        "filing_date": None,
+        "financial_signals": {},
+        "lock_in_keyword_hits": [],
+        "camouflage_keyword_hits": [],
+        "keyword_count": 0,
+        "error": None,
+        "source": "eu",
+        "exchange": exchange,
+    }
+
+    # Financial signals via yfinance (works for all EU exchanges)
+    if YFINANCE_AVAILABLE:
+        try:
+            ticker_obj = yf.Ticker(ticker)
+            result["financial_signals"] = _extract_financial_signals(ticker, ticker_obj.info.get("_company"))
+            # Also capture insider ownership from prefilter signals
+            info = ticker_obj.info
+            insider_pct = info.get("heldPercentInsiders")
+            result["financial_signals"]["insider_ownership_pct"] = (
+                round(insider_pct * 100, 1) if insider_pct is not None else None
+            )
+            result["financial_signals"]["family_owned"] = (insider_pct or 0) > 0.20
+        except Exception as e:
+            logger.warning(f"{ticker}: yfinance financial signals failed: {e}")
+
+    # Text via Bundesanzeiger (DE companies only)
+    if exchange == "xetra" and company_name:
+        from data.bundesanzeiger import fetch_bundesanzeiger_text
+        ba_result = fetch_bundesanzeiger_text(company_name, ticker)
+        if not ba_result.get("error"):
+            result["business_description"] = ba_result.get("business_description", "")
+            result["risk_factors"] = ba_result.get("risk_factors", "")
+            result["mda"] = ba_result.get("mda", "")
+            result["filing_date"] = ba_result.get("filing_date")
+            result["has_10k"] = bool(result["business_description"])
+
+    # Keyword scoring on whatever text we have
+    full_text = (
+        result["business_description"] + " " +
+        result["risk_factors"] + " " +
+        result["mda"]
+    ).lower()
+
+    all_lock_in = LOCK_IN_KEYWORDS + LOCK_IN_KEYWORDS_DE
+    result["lock_in_keyword_hits"] = [kw for kw in all_lock_in if kw.lower() in full_text]
+    result["camouflage_keyword_hits"] = [kw for kw in CAMOUFLAGE_KEYWORDS if kw.lower() in full_text]
+    result["keyword_count"] = len(result["lock_in_keyword_hits"])
+
+    risk_lower = result["risk_factors"].lower()
+    biz_lower = result["business_description"].lower()
+    result["has_contradiction_signal"] = (
+        any(kw.lower() in risk_lower for kw in CAMOUFLAGE_KEYWORDS) and
+        any(kw.lower() in biz_lower for kw in all_lock_in[:15])
+    )
 
     return result
 
@@ -241,51 +337,75 @@ def _extract_financial_signals(ticker: str, company) -> dict:
         if revenue_growth is not None:
             signals["revenue_growth_yoy"] = round(revenue_growth * 100, 1)
 
-        # Operating leverage: revenue grows faster than operating expenses
-        # Proxy: if gross margin is rising while revenue grows
-        # (Would need multi-year income statement for proper calc)
+        # Multi-year margin trends (up to 4 years from yfinance annual financials)
         financials = ticker_obj.financials
         if financials is not None and not financials.empty:
-            if len(financials.columns) >= 2:
-                # Try to compute gross margin trend from income statement
-                try:
-                    total_rev = financials.loc["Total Revenue"] if "Total Revenue" in financials.index else None
-                    gross_profit = financials.loc["Gross Profit"] if "Gross Profit" in financials.index else None
-                    sm_expense = (
-                        financials.loc["Selling General Administrative"] 
-                        if "Selling General Administrative" in financials.index else None
-                    )
+            try:
+                total_rev = financials.loc["Total Revenue"] if "Total Revenue" in financials.index else None
+                gross_profit = financials.loc["Gross Profit"] if "Gross Profit" in financials.index else None
+                sm_expense = (
+                    financials.loc["Selling General Administrative"]
+                    if "Selling General Administrative" in financials.index else None
+                )
 
-                    if total_rev is not None and gross_profit is not None:
-                        gm_current = (gross_profit.iloc[0] / total_rev.iloc[0]) if total_rev.iloc[0] else 0
-                        gm_prev = (gross_profit.iloc[1] / total_rev.iloc[1]) if total_rev.iloc[1] else 0
-                        signals["gross_margin_current"] = round(gm_current * 100, 1)
-                        signals["gross_margin_prev"] = round(gm_prev * 100, 1)
-                        delta = gm_current - gm_prev
+                if total_rev is not None and gross_profit is not None and len(total_rev) >= 2:
+                    # Compute gross margin for all available years (newest first)
+                    gm_series = []
+                    for i in range(len(total_rev)):
+                        rev = total_rev.iloc[i]
+                        gp = gross_profit.iloc[i]
+                        if rev and rev != 0:
+                            gm_series.append(round(gp / rev * 100, 1))
+
+                    if gm_series:
+                        signals["gross_margin_current"] = gm_series[0]
+                        signals["gross_margin_prev"] = gm_series[1] if len(gm_series) > 1 else None
+                        signals["gross_margin_history"] = gm_series  # full history for LLM
+
+                        delta_1y = gm_series[0] - gm_series[1] if len(gm_series) > 1 else 0
                         signals["gross_margin_trend"] = (
-                            "rising" if delta > 0.02 else
-                            "falling" if delta < -0.02 else
+                            "rising" if delta_1y > 2 else
+                            "falling" if delta_1y < -2 else
                             "stable"
                         )
 
-                    if sm_expense is not None and total_rev is not None:
-                        sm_current = abs(sm_expense.iloc[0]) / total_rev.iloc[0] if total_rev.iloc[0] else 0
-                        sm_prev = abs(sm_expense.iloc[1]) / total_rev.iloc[1] if total_rev.iloc[1] else 0
-                        signals["sm_revenue_ratio_current"] = round(sm_current * 100, 1)
-                        signals["sm_revenue_ratio_prev"] = round(sm_prev * 100, 1)
+                        # 4-year consistency: count years where GM was rising
+                        if len(gm_series) >= 3:
+                            rising_years = sum(
+                                1 for i in range(len(gm_series) - 1)
+                                if gm_series[i] > gm_series[i + 1] + 1
+                            )
+                            signals["gross_margin_consistently_rising"] = (
+                                rising_years >= len(gm_series) - 1
+                            )
+
+                if sm_expense is not None and total_rev is not None and len(total_rev) >= 2:
+                    sm_series = []
+                    for i in range(len(total_rev)):
+                        rev = total_rev.iloc[i]
+                        sm = sm_expense.iloc[i]
+                        if rev and rev != 0:
+                            sm_series.append(round(abs(sm) / rev * 100, 1))
+
+                    if sm_series:
+                        signals["sm_revenue_ratio_current"] = sm_series[0]
+                        signals["sm_revenue_ratio_prev"] = sm_series[1] if len(sm_series) > 1 else None
                         signals["sm_revenue_trend"] = (
-                            "falling" if sm_current < sm_prev * 0.95 else
-                            "rising" if sm_current > sm_prev * 1.05 else
+                            "falling" if sm_series[0] < sm_series[1] * 0.95 else
+                            "rising" if sm_series[0] > sm_series[1] * 1.05 else
                             "stable"
-                        )
+                        ) if len(sm_series) > 1 else "unknown"
 
-                        # Operating leverage signal: GM rising AND S&M/Rev falling
-                        signals["operating_leverage_signal"] = (
-                            signals.get("gross_margin_trend") == "rising" and
-                            signals.get("sm_revenue_trend") == "falling"
-                        )
-                except Exception as e:
-                    logger.debug(f"Trend calculation failed for {ticker}: {e}")
+                        # Operating leverage: GM rising + S&M/Rev falling (multi-year)
+                        gm_rising = signals.get("gross_margin_trend") == "rising"
+                        sm_falling = signals.get("sm_revenue_trend") == "falling"
+                        gm_consistent = signals.get("gross_margin_consistently_rising", False)
+                        signals["operating_leverage_signal"] = gm_rising and sm_falling
+                        # Stronger signal: consistent over multiple years
+                        signals["strong_operating_leverage"] = gm_consistent and sm_falling
+
+            except Exception as e:
+                logger.debug(f"Trend calculation failed for {ticker}: {e}")
 
     except Exception as e:
         logger.warning(f"Financial signal extraction failed for {ticker}: {e}")
@@ -339,9 +459,15 @@ def compute_lane_scores(filing_data: dict, config: dict) -> dict:
         total_score += lanes["emerging_platform"]
 
     # Lane 3: Scale Inflection (operating leverage signal)
-    if signals.get("operating_leverage_signal"):
+    if signals.get("strong_operating_leverage"):
+        lanes["scale_inflection"] = 100  # multi-year confirmed
+        total_score += 100
+    elif signals.get("operating_leverage_signal"):
         lanes["scale_inflection"] = 80
         total_score += 80
+    elif signals.get("gross_margin_consistently_rising"):
+        lanes["scale_inflection"] = 60
+        total_score += 60
     elif signals.get("gross_margin_trend") == "rising":
         lanes["scale_inflection"] = 40
         total_score += 40
