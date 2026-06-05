@@ -346,6 +346,17 @@ def build_eu_universe(config: dict, conn) -> list[dict]:
 def _upsert_eu_companies(conn, companies: list[dict]):
     """Write EU companies to DB if not already present."""
     now = datetime.now(timezone.utc).isoformat()
+
+    # Seed EU cohorts into universe_cohorts to satisfy FK constraint
+    eu_cohort_ids = {c.get("cohort_id") for c in companies if c.get("cohort_id")}
+    for cohort_id in eu_cohort_ids:
+        conn.execute("""
+            INSERT OR IGNORE INTO universe_cohorts
+            (cohort_id, name, added_at, alerting_enabled)
+            VALUES (?, ?, ?, 1)
+        """, (cohort_id, cohort_id.replace("eu_", "EU ").title(), now))
+    conn.commit()
+
     for company in companies:
         existing = conn.execute(
             "SELECT ticker FROM companies WHERE ticker = ?",
