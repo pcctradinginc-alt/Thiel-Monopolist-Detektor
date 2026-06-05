@@ -87,135 +87,208 @@ def should_send_alert(
 
 
 def format_email_html(ticker: str, assessment: dict, filing_data: dict, hypotheses: dict) -> str:
-    """Format a rich HTML alert email."""
-    scores = assessment.get("scores", {})
-    alert_type = assessment.get("alert_type", "UNKNOWN")
-    alert_desc = ALERT_DESCRIPTIONS.get(alert_type, "")
-    criteria = assessment.get("criteria", {})
-    summary = assessment.get("evaluation_summary", "")
-    next_steps = assessment.get("next_verification_steps", [])
-    status = assessment.get("status", "")
+    """Format alert email in clean Apple-style design."""
+    scores      = assessment.get("scores", {})
+    alert_type  = assessment.get("alert_type", "UNKNOWN")
+    alert_desc  = ALERT_DESCRIPTIONS.get(alert_type, "")
+    criteria    = assessment.get("criteria", {})
+    summary     = assessment.get("evaluation_summary", "")
+    next_steps  = assessment.get("next_verification_steps", [])
+    status      = assessment.get("status", "")
 
-    # Color coding
-    monopoly_score = scores.get("monopoly_score", 0)
-    score_color = "#2d7a2d" if monopoly_score >= 75 else "#b07a00" if monopoly_score >= 55 else "#888"
+    monopoly_score   = scores.get("monopoly_score", 0)
+    confidence_score = scores.get("confidence_score", 0)
+    data_quality     = scores.get("data_quality_score", 0)
 
-    narrow_markets = hypotheses.get("narrow_market_hypotheses", [])
-    primary_hypothesis = narrow_markets[0] if narrow_markets else {}
+    narrow_markets    = hypotheses.get("narrow_market_hypotheses", [])
+    primary           = narrow_markets[0] if narrow_markets else {}
+    claimed_market    = hypotheses.get("company_claimed_market", "—")
+    filing_date       = filing_data.get("filing_date", "—")
 
-    def score_bar(score):
-        filled = int(score / 10)
-        return "█" * filled + "░" * (10 - filled)
+    # Score ring colour: blue ≥75, amber 55–74, gray <55
+    def ring_color(s):
+        return "#0071e3" if s >= 75 else "#f0a500" if s >= 55 else "#86868b"
 
-    def format_list(items, limit=4):
-        if not items:
-            return "<li><em>None identified</em></li>"
-        return "".join(f"<li>{item}</li>" for item in items[:limit])
-
-    criteria_html = ""
-    for crit_key, crit_data in criteria.items():
-        crit_name = crit_key.replace("_", " ").title()
-        crit_score = crit_data.get("score", 0)
-        evidence = crit_data.get("evidence", [])
-        counter = crit_data.get("counter_evidence", [])
-        criteria_html += f"""
-        <div style="margin: 16px 0; padding: 12px; background: #f8f8f8; border-radius: 6px;">
-          <strong>{crit_name}</strong> — Score: {crit_score}/100
-          <div style="font-family: monospace; color: {score_color};">{score_bar(crit_score)}</div>
-          <div style="margin-top: 8px;">
-            <span style="color: #2d7a2d; font-weight: bold;">✓ Evidence:</span>
-            <ul style="margin: 4px 0;">{"".join(f"<li>{e}</li>" for e in evidence[:3])}</ul>
+    def score_ring(score, label):
+        color = ring_color(score)
+        return f"""
+        <td style="text-align:center; padding: 0 20px;">
+          <div style="display:inline-block; width:64px; height:64px; border-radius:50%;
+                      border: 3px solid {color}; line-height:58px; text-align:center;">
+            <span style="font-size:20px; font-weight:600; color:{color};">{score}</span>
           </div>
-          <div style="margin-top: 8px;">
-            <span style="color: #c0392b; font-weight: bold;">✗ Counter-evidence:</span>
-            <ul style="margin: 4px 0;">{"".join(f"<li>{c}</li>" for c in counter[:3])}</ul>
-          </div>
-        </div>"""
+          <div style="margin-top:6px; font-size:11px; color:#86868b;
+                      letter-spacing:0.04em; text-transform:uppercase;">{label}</div>
+        </td>"""
 
-    return f"""
-<!DOCTYPE html>
-<html>
+    def criteria_row(key, data):
+        name   = key.replace("_", " ").title()
+        s      = data.get("score", 0)
+        color  = ring_color(s)
+        ev     = data.get("evidence", [])[:2]
+        ce     = data.get("counter_evidence", [])[:2]
+        bar_w  = s  # percent
+        ev_html = "".join(f'<li style="margin:3px 0;">{e}</li>' for e in ev) or "<li style='color:#86868b'>—</li>"
+        ce_html = "".join(f'<li style="margin:3px 0;">{e}</li>' for e in ce) or "<li style='color:#86868b'>—</li>"
+        return f"""
+        <tr>
+          <td colspan="2" style="padding: 0 0 1px 0;">
+            <div style="background:#ffffff; border:1px solid #d2d2d7; border-radius:12px;
+                        padding:16px 20px; margin-bottom:8px;">
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                <span style="font-size:13px; font-weight:600; color:#1d1d1f;">{name}</span>
+                <span style="font-size:13px; font-weight:600; color:{color};">{s}/100</span>
+              </div>
+              <div style="height:4px; background:#f5f5f7; border-radius:2px; margin-bottom:12px;">
+                <div style="height:4px; width:{bar_w}%; background:{color}; border-radius:2px;"></div>
+              </div>
+              <table width="100%" style="border-collapse:collapse;">
+                <tr>
+                  <td width="50%" style="vertical-align:top; padding-right:12px;">
+                    <div style="font-size:11px; font-weight:600; color:#34c759;
+                                text-transform:uppercase; letter-spacing:0.05em; margin-bottom:4px;">For</div>
+                    <ul style="margin:0; padding-left:16px; font-size:12px; color:#3a3a3c;">{ev_html}</ul>
+                  </td>
+                  <td width="50%" style="vertical-align:top;">
+                    <div style="font-size:11px; font-weight:600; color:#ff3b30;
+                                text-transform:uppercase; letter-spacing:0.05em; margin-bottom:4px;">Against</div>
+                    <ul style="margin:0; padding-left:16px; font-size:12px; color:#3a3a3c;">{ce_html}</ul>
+                  </td>
+                </tr>
+              </table>
+            </div>
+          </td>
+        </tr>"""
+
+    criteria_rows = "".join(criteria_row(k, v) for k, v in criteria.items())
+    steps_html    = "".join(
+        f'<li style="margin:6px 0; font-size:13px; color:#3a3a3c;">{s}</li>'
+        for s in next_steps[:4]
+    )
+
+    return f"""<!DOCTYPE html>
+<html lang="en">
 <head>
   <meta charset="UTF-8">
-  <style>
-    body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-           font-size: 14px; color: #222; max-width: 680px; margin: 0 auto; padding: 20px; }}
-    .header {{ background: #1a1a2e; color: white; padding: 20px; border-radius: 8px; }}
-    .alert-badge {{ display: inline-block; background: {score_color}; color: white;
-                   padding: 4px 12px; border-radius: 4px; font-size: 12px;
-                   font-weight: bold; letter-spacing: 0.05em; }}
-    .scores {{ display: flex; gap: 16px; margin: 16px 0; flex-wrap: wrap; }}
-    .score-box {{ padding: 12px 16px; background: #f0f4f8; border-radius: 6px; text-align: center; }}
-    .score-number {{ font-size: 24px; font-weight: bold; color: {score_color}; }}
-    .section {{ margin: 20px 0; }}
-    h3 {{ color: #333; border-bottom: 1px solid #eee; padding-bottom: 6px; }}
-    .hypothesis-box {{ background: #e8f4e8; border-left: 3px solid #2d7a2d;
-                      padding: 12px; border-radius: 0 6px 6px 0; margin: 12px 0; }}
-    .next-steps {{ background: #fff3cd; padding: 12px; border-radius: 6px; }}
-    .footer {{ font-size: 11px; color: #888; margin-top: 24px; border-top: 1px solid #eee; padding-top: 12px; }}
-  </style>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
 </head>
-<body>
-  <div class="header">
-    <h2 style="margin: 0 0 8px 0;">🔍 Thiel Monopolist Detector</h2>
-    <div class="alert-badge">{alert_type}</div>
-    <span style="margin-left: 12px; font-size: 13px; color: #ccc;">{alert_desc}</span>
-    <h1 style="margin: 12px 0 0 0; font-size: 28px;">{ticker}</h1>
-    <p style="margin: 4px 0 0 0; color: #aaa; font-size: 13px;">Status: {status}</p>
-  </div>
+<body style="margin:0; padding:0; background:#f5f5f7;
+             font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text','Helvetica Neue',sans-serif;">
 
-  <div class="scores">
-    <div class="score-box">
-      <div class="score-number">{scores.get("monopoly_score", 0)}</div>
-      <div style="font-size: 11px; color: #666;">Monopoly Score</div>
-    </div>
-    <div class="score-box">
-      <div class="score-number">{scores.get("confidence_score", 0)}</div>
-      <div style="font-size: 11px; color: #666;">Confidence</div>
-    </div>
-    <div class="score-box">
-      <div class="score-number">{scores.get("data_quality_score", 0)}</div>
-      <div style="font-size: 11px; color: #666;">Data Quality</div>
-    </div>
-  </div>
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f5f5f7; padding:32px 0;">
+  <tr><td align="center">
+  <table width="600" cellpadding="0" cellspacing="0" style="max-width:600px; width:100%;">
 
-  <div class="section">
-    <h3>Summary</h3>
-    <p>{summary}</p>
-  </div>
+    <!-- Header -->
+    <tr>
+      <td style="padding-bottom:8px;">
+        <p style="margin:0; font-size:12px; color:#86868b; letter-spacing:0.06em;
+                  text-transform:uppercase;">Thiel Monopolist Detector</p>
+      </td>
+    </tr>
 
-  <div class="section">
-    <h3>Primary Market Hypothesis</h3>
-    <div class="hypothesis-box">
-      <strong>Claimed market:</strong> {hypotheses.get("company_claimed_market", "Unknown")}<br><br>
-      <strong>Actual narrow market:</strong> {primary_hypothesis.get("narrow_market", "N/A")}<br>
-      <em>{primary_hypothesis.get("why_narrow", "")}</em>
-    </div>
-  </div>
+    <!-- Ticker card -->
+    <tr>
+      <td style="background:#ffffff; border-radius:16px; padding:28px 28px 24px;
+                 box-shadow:0 1px 3px rgba(0,0,0,.08); margin-bottom:12px;">
+        <p style="margin:0 0 4px 0; font-size:12px; font-weight:600; color:#0071e3;
+                  letter-spacing:0.08em; text-transform:uppercase;">{alert_type.replace("_"," ")}</p>
+        <h1 style="margin:0 0 6px 0; font-size:36px; font-weight:700;
+                   letter-spacing:-0.02em; color:#1d1d1f;">{ticker}</h1>
+        <p style="margin:0 0 16px 0; font-size:14px; color:#86868b;">{alert_desc}</p>
+        <hr style="border:none; border-top:1px solid #d2d2d7; margin:0 0 20px 0;">
+        <!-- Score rings -->
+        <table width="100%" cellpadding="0" cellspacing="0">
+          <tr>
+            {score_ring(monopoly_score,   "Monopoly")}
+            {score_ring(confidence_score, "Confidence")}
+            {score_ring(data_quality,     "Data Quality")}
+          </tr>
+        </table>
+      </td>
+    </tr>
 
-  <div class="section">
-    <h3>Thiel Criteria Analysis</h3>
-    {criteria_html}
-  </div>
+    <tr><td style="height:12px;"></td></tr>
 
-  <div class="next-steps section">
-    <h3>⚡ Next Verification Steps</h3>
-    <ul>
-      {"".join(f"<li>{step}</li>" for step in next_steps[:5])}
-    </ul>
-    <p style="font-size: 12px; color: #666;">
-      This is a candidate flagged by an automated system. Human analysis required before any investment decision.
-    </p>
-  </div>
+    <!-- Summary card -->
+    <tr>
+      <td style="background:#ffffff; border-radius:16px; padding:24px 28px;
+                 box-shadow:0 1px 3px rgba(0,0,0,.08);">
+        <p style="margin:0 0 8px 0; font-size:11px; font-weight:600; color:#86868b;
+                  text-transform:uppercase; letter-spacing:0.06em;">Summary</p>
+        <p style="margin:0; font-size:14px; line-height:1.6; color:#1d1d1f;">{summary}</p>
+      </td>
+    </tr>
 
-  <div class="footer">
-    <p>Thiel Monopolist Detector | Automated screening system<br>
-    Filing date: {filing_data.get("filing_date", "unknown")} |
-    Data sources: {"10-K" if filing_data.get("has_10k") else ""} {"S-1" if filing_data.get("has_s1") else ""} yfinance
-    </p>
-    <p>Reply to this GitHub Issue with labels: <strong>confirmed</strong> / <strong>rejected</strong> /
-    <strong>watchlist</strong> / <strong>too-early</strong></p>
-  </div>
+    <tr><td style="height:12px;"></td></tr>
+
+    <!-- Hypothesis card -->
+    <tr>
+      <td style="background:#ffffff; border-radius:16px; padding:24px 28px;
+                 box-shadow:0 1px 3px rgba(0,0,0,.08);">
+        <p style="margin:0 0 16px 0; font-size:11px; font-weight:600; color:#86868b;
+                  text-transform:uppercase; letter-spacing:0.06em;">Market Hypothesis</p>
+        <table width="100%" cellpadding="0" cellspacing="0">
+          <tr>
+            <td width="50%" style="vertical-align:top; padding-right:16px;">
+              <p style="margin:0 0 4px 0; font-size:11px; color:#86868b;">Claimed market</p>
+              <p style="margin:0; font-size:13px; color:#3a3a3c;">{claimed_market}</p>
+            </td>
+            <td width="50%" style="vertical-align:top;
+                border-left:1px solid #d2d2d7; padding-left:16px;">
+              <p style="margin:0 0 4px 0; font-size:11px; color:#86868b;">Actual narrow market</p>
+              <p style="margin:0; font-size:13px; font-weight:600; color:#1d1d1f;">
+                {primary.get("narrow_market","—")}</p>
+              <p style="margin:6px 0 0 0; font-size:12px; color:#86868b; line-height:1.5;">
+                {primary.get("why_narrow","")}</p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+
+    <tr><td style="height:12px;"></td></tr>
+
+    <!-- Criteria cards -->
+    <tr>
+      <td style="background:#ffffff; border-radius:16px; padding:24px 28px;
+                 box-shadow:0 1px 3px rgba(0,0,0,.08);">
+        <p style="margin:0 0 16px 0; font-size:11px; font-weight:600; color:#86868b;
+                  text-transform:uppercase; letter-spacing:0.06em;">Thiel Criteria</p>
+        <table width="100%" cellpadding="0" cellspacing="0">
+          {criteria_rows}
+        </table>
+      </td>
+    </tr>
+
+    <tr><td style="height:12px;"></td></tr>
+
+    <!-- Next steps card -->
+    <tr>
+      <td style="background:#ffffff; border-radius:16px; padding:24px 28px;
+                 box-shadow:0 1px 3px rgba(0,0,0,.08);">
+        <p style="margin:0 0 12px 0; font-size:11px; font-weight:600; color:#86868b;
+                  text-transform:uppercase; letter-spacing:0.06em;">Next Steps</p>
+        <ul style="margin:0; padding-left:18px;">{steps_html}</ul>
+      </td>
+    </tr>
+
+    <tr><td style="height:12px;"></td></tr>
+
+    <!-- Footer -->
+    <tr>
+      <td style="padding:4px 4px 32px;">
+        <p style="margin:0; font-size:11px; color:#86868b; line-height:1.6;">
+          Automated screening — human analysis required before any investment decision.<br>
+          Filing: {filing_date} &nbsp;·&nbsp; Status: {status}
+        </p>
+      </td>
+    </tr>
+
+  </table>
+  </td></tr>
+  </table>
+
 </body>
 </html>"""
 
