@@ -42,7 +42,7 @@ screening:
   # LLM-Konfiguration
   model_screening: "claude-haiku-4-5-20251001"
   model_final: "claude-sonnet-4-6"
-  max_calls_per_run: 150
+  max_calls_per_run: 400          # US ~150 + EU ~250
   max_input_tokens_per_call: 12000
   rate_limit_rpm: 40
   rate_limit_tpm: 400000
