@@ -95,7 +95,7 @@ screening:
 alerts:
   # Alert-Hysterese
   min_score_delta_for_alert: 8     # Mindestveränderung für erneuten Alert
-  alert_cooldown_days: 21          # Kein zweiter Alert innerhalb von X Tagen
+  alert_cooldown_days: 90          # Kein zweiter Alert innerhalb von X Tagen
 
   # Email-Konfiguration (via GitHub Secrets)
   email_subject_prefix: "[Thiel Detector]"
