@@ -109,6 +109,8 @@ jobs:
           WEBHOOK_SECRET: ${{ secrets.WEBHOOK_SECRET }}
           WORKER_URL: ${{ secrets.WORKER_URL }}
           GITHUB_REPO: pcctradinginc-alt/Thiel-Monopolist-Detektor
+          COMPANIES_HOUSE_API_KEY: ${{ secrets.COMPANIES_HOUSE_API_KEY }}
+          EODHD_API_KEY: ${{ secrets.EODHD_API_KEY }}
           MANUAL_BATCH_ID: ${{ github.event.inputs.batch_id }}
         run: |
           mkdir -p data logs

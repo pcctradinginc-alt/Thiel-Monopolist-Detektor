@@ -221,6 +221,68 @@ def save_evaluation(conn, ticker: str, run_id: str, filing_data: dict,
     conn.commit()
 
 
+def _prioritize_universe(universe: list[dict], conn, max_calls: int) -> list[dict]:
+    """
+    Sort universe for 4-week rotation:
+      Tier 1 (always): IPOs + never analyzed
+      Tier 2 (weekly): score ≥ 55 candidates (hot leads)
+      Tier 3 (rotation): everyone else, oldest-first
+    Caps at max_calls so every company appears in exactly one run/month.
+    """
+    from datetime import datetime, timezone, timedelta
+
+    # Fetch last_evaluated + monopoly_score from DB for all tickers
+    known = {}
+    rows = conn.execute(
+        "SELECT ticker, last_evaluated, monopoly_score FROM company_status"
+    ).fetchall()
+    for row in rows:
+        known[row["ticker"]] = {
+            "last_evaluated": row["last_evaluated"],
+            "monopoly_score": row["monopoly_score"] or 0,
+        }
+
+    now = datetime.now(timezone.utc)
+    four_weeks_ago = now - timedelta(days=28)
+
+    tier1, tier2, tier3 = [], [], []
+
+    for company in universe:
+        ticker = company.get("ticker", "")
+        info = known.get(ticker, {})
+        last_eval = info.get("last_evaluated")
+        score = info.get("monopoly_score", 0)
+        is_ipo = company.get("cohort_id") in ("eu_ipo", "ipo_recent") or \
+                 company.get("source") == "ipo"
+
+        if is_ipo or not last_eval:
+            tier1.append(company)
+        elif score >= 55:
+            tier2.append(company)
+        else:
+            tier3.append(company)
+
+    # Sort tier3 by last_evaluated ascending (oldest first)
+    def sort_key(c):
+        info = known.get(c.get("ticker", ""), {})
+        le = info.get("last_evaluated")
+        if not le:
+            return "0000"
+        return le
+
+    tier3.sort(key=sort_key)
+
+    prioritized = tier1 + tier2 + tier3
+    result = prioritized[:max_calls]
+
+    logger.info(
+        f"Rotation tiers — IPO/new: {len(tier1)}, "
+        f"hot (≥55): {len(tier2)}, "
+        f"rotation: {len(tier3)} → {len(result)} selected"
+    )
+    return result
+
+
 def run_screening(config: dict, conn, run_id: str, dry_run: bool = False,
                   max_companies: int = None, resume_from: str = None):
     """Main screening loop."""
@@ -250,6 +312,16 @@ def run_screening(config: dict, conn, run_id: str, dry_run: bool = False,
     if not universe:
         logger.error("Empty universe — aborting")
         return
+
+    # ── 4-Week Rotation ──────────────────────────────────────────────────────
+    # Priority order (descending):
+    #   1. Never analyzed (new companies, IPOs)
+    #   2. High-scoring candidates (score ≥ 55) — re-check every week
+    #   3. Oldest last_evaluated — ensures full coverage over 4 weeks
+    # Result: all companies analyzed at least once/month, hot candidates weekly
+    universe = _prioritize_universe(universe, conn, max_calls)
+    logger.info(f"After rotation priority: {len(universe)} companies queued "
+                f"(max {max_calls} LLM calls)")
 
     if max_companies:
         universe = universe[:max_companies]

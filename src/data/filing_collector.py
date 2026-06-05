@@ -204,7 +204,7 @@ def fetch_eu_filing_data(ticker: str, company_name: str, exchange: str = "xetra"
         except Exception as e:
             logger.warning(f"{ticker}: yfinance financial signals failed: {e}")
 
-    # Text via Bundesanzeiger (DE companies only, including IPO prospectuses)
+    # ── Text Source 1: Bundesanzeiger (DE) ───────────────────────────────────
     if exchange in ("xetra", "eu_ipo", "eu_ipo_bafin") and company_name:
         from data.bundesanzeiger import fetch_bundesanzeiger_text
         ba_result = fetch_bundesanzeiger_text(company_name, ticker)
@@ -214,6 +214,29 @@ def fetch_eu_filing_data(ticker: str, company_name: str, exchange: str = "xetra"
             result["mda"] = ba_result.get("mda", "")
             result["filing_date"] = ba_result.get("filing_date")
             result["has_10k"] = bool(result["business_description"])
+
+    # ── Text Source 2: Companies House (UK) ──────────────────────────────────
+    if exchange in ("lse", "aim") and company_name:
+        import os
+        ch_key = os.environ.get("COMPANIES_HOUSE_API_KEY", "")
+        if ch_key:
+            from data.companies_house import get_filing_text
+            ch_result = get_filing_text(ticker, company_name, ch_key)
+            if not ch_result.get("error") and ch_result.get("business_description"):
+                result["business_description"] = ch_result["business_description"]
+                result["risk_factors"] = ch_result.get("risk_factors", "")
+                result["mda"] = ch_result.get("mda", "")
+                result["filing_date"] = ch_result.get("filing_date")
+                result["has_10k"] = True
+
+    # ── Text Source 3: EODHD (fallback for all EU) ───────────────────────────
+    # Only used when no text available from above sources
+    if not result["business_description"]:
+        import os
+        eodhd_key = os.environ.get("EODHD_API_KEY", "")
+        if eodhd_key:
+            from data.eodhd_enricher import enrich_filing_data
+            result = enrich_filing_data(result, ticker, eodhd_key)
 
     # Keyword scoring on whatever text we have
     full_text = (
