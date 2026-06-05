@@ -1,0 +1,59 @@
+name: Test Eulerpool API
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install requests -q
+      - name: Probe Eulerpool API endpoints
+        env:
+          EULERPOOL_API_KEY: ${{ secrets.EULERPOOL_API_KEY }}
+        run: |
+          python3 - << 'EOF'
+          import requests, os, json
+
+          token = os.environ.get("EULERPOOL_API_KEY", "")
+          print(f"Token length: {len(token)}, starts with: {token[:8]}...")
+
+          base = "https://api.eulerpool.com"
+          # Try all auth methods and endpoint patterns
+          tests = [
+              ("Bearer", {"Authorization": f"Bearer {token}"}),
+              ("apikey", {"apikey": token}),
+              ("X-API-Key", {"X-API-Key": token}),
+          ]
+
+          endpoints = [
+              "/v1/stocks?limit=5",
+              "/v1/screener?limit=5",
+              "/v1/instruments?exchange=XETRA&limit=5",
+              "/v1/stock/screener?limit=5",
+              "/v1/company?limit=5",
+              "/v1/fundamentals/SAP",
+              "/v1/stock/SAP",
+              "/v1/price/SAP",
+              "/stocks?limit=5",
+              "/screener?limit=5",
+          ]
+
+          for ep in endpoints:
+              for auth_name, auth_header in tests:
+                  url = base + ep
+                  try:
+                      r = requests.get(url, headers=auth_header, timeout=8)
+                      if r.status_code == 200:
+                          print(f"\n✅ SUCCESS [{auth_name}] {ep}")
+                          print(json.dumps(r.json(), indent=2)[:500])
+                          break
+                      elif r.status_code not in (404, 403):
+                          print(f"  [{auth_name}] {r.status_code} {ep}: {r.text[:100]}")
+                  except Exception as e:
+                      pass
+          EOF
