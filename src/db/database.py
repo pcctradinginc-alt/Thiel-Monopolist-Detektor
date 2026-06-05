@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS companies (
     ticker TEXT PRIMARY KEY,
     name TEXT,
     cohort_id TEXT,
+    cik TEXT,
     sic_code TEXT,
     exchange TEXT,
     market_cap_m REAL,

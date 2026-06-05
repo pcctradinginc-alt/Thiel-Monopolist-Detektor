@@ -14,7 +14,7 @@ build/
 config/config.yaml
 
 # Database (stored as GitHub Release Asset, not in repo)
-data/
+/data/
 *.db
 *.db-shm
 *.db-wal

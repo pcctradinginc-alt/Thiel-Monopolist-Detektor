@@ -27,7 +27,7 @@ ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
 from db.database import get_connection, seed_cohorts
-from universe.universe_builder import build_universe, compute_lane_scores
+from universe.universe_builder import build_universe
 from data.filing_collector import fetch_filing_data, compute_lane_scores as compute_lanes
 from analysis.llm_analyzer import analyze_company
 from alerts.alert_manager import process_alerts
