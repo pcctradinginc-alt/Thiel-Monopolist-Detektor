@@ -142,6 +142,16 @@ CREATE TABLE IF NOT EXISTS run_state (
     tokens_used_output INTEGER DEFAULT 0
 );
 
+-- Batch API runs (submitted async, collected next day)
+CREATE TABLE IF NOT EXISTS batch_runs (
+    batch_id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL,
+    submitted_at TEXT NOT NULL,
+    collected_at TEXT,
+    status TEXT CHECK(status IN ('submitted', 'collected', 'failed')) DEFAULT 'submitted',
+    company_count INTEGER DEFAULT 0
+);
+
 -- Indexes
 CREATE INDEX IF NOT EXISTS idx_evaluations_ticker ON evaluations(ticker);
 CREATE INDEX IF NOT EXISTS idx_evaluations_run ON evaluations(run_id);

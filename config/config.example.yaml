@@ -48,6 +48,7 @@ screening:
   rate_limit_tpm: 400000
 
   # Scoring-Schwellen
+  use_batch_api: true               # Anthropic Batch API (50% günstiger, Ergebnisse in <24h)
   min_score_for_llm_call: 40        # Lane-Score ab dem LLM aufgerufen wird
   min_monopoly_score_alert: 65      # Minimum monopoly_score für Alert
   min_confidence_score_alert: 60    # Minimum confidence_score für Alert

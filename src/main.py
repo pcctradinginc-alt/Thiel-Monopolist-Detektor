@@ -32,6 +32,7 @@ from universe.eu_universe_builder import build_eu_universe
 from data.filing_collector import fetch_filing_data, fetch_eu_filing_data, compute_lane_scores as compute_lanes
 from data.eu_prefilter import batch_prefilter
 from analysis.llm_analyzer import analyze_company
+from analysis.batch_analyzer import submit_batch, collect_batch, get_pending_batch
 from alerts.alert_manager import process_alerts
 from feedback.feedback_processor import process_feedback
 
@@ -355,7 +356,7 @@ def run_screening(config: dict, conn, run_id: str, dry_run: bool = False,
 
 def main():
     parser = argparse.ArgumentParser(description="Thiel Monopolist Detector")
-    parser.add_argument("--mode", choices=["full", "feedback", "status"], default="full")
+    parser.add_argument("--mode", choices=["full", "feedback", "status", "batch_submit", "batch_collect"], default="full")
     parser.add_argument("--config", help="Path to config YAML")
     parser.add_argument("--dry-run", action="store_true", help="Don't send alerts")
     parser.add_argument("--max-companies", type=int, help="Limit for testing")
@@ -374,7 +375,51 @@ def main():
     run_id = str(uuid.uuid4())[:8]
     logger.info(f"Starting run {run_id} | mode={args.mode} | dry_run={args.dry_run}")
 
-    if args.mode == "feedback":
+    if args.mode == "batch_submit":
+        # Build universe, filter, collect filing data, submit as one batch
+        logger.info("Building universe for batch submission...")
+        universe = build_universe(config, conn)
+        if config.get("eu_universe", {}).get("enabled"):
+            eu_candidates = build_eu_universe(config, conn)
+            if eu_candidates:
+                eu_passed, _ = batch_prefilter(eu_candidates, exchange_suffix="")
+                universe = universe + eu_passed
+
+        screening_cfg = config.get("screening", {})
+        min_lane_score = screening_cfg.get("min_score_for_llm_call", 40)
+        max_calls = screening_cfg.get("max_calls_per_run", 150)
+        manual_watchlist = screening_cfg.get("lanes", {}).get("manual_watchlist", {}).get("tickers", [])
+
+        companies_with_filings = []
+        for company in universe:
+            ticker = company.get("ticker", "")
+            if not ticker or len(companies_with_filings) >= max_calls:
+                break
+            if company.get("source") == "eu" or company.get("exchange"):
+                filing_data = fetch_eu_filing_data(ticker, company.get("name", ""), company.get("exchange", "xetra"))
+            else:
+                filing_data = fetch_filing_data(ticker, cik=company.get("cik"))
+            lane_data = compute_lanes(filing_data, config)
+            if lane_data.get("total_lane_score", 0) >= min_lane_score or ticker in manual_watchlist:
+                companies_with_filings.append((ticker, filing_data))
+
+        batch_id = submit_batch(companies_with_filings, config, conn, run_id)
+        if batch_id:
+            logger.info(f"Batch submitted: {batch_id} ({len(companies_with_filings)} companies)")
+            logger.info("Run batch_collect in 1-24h to retrieve results.")
+        else:
+            logger.error("Batch submission failed")
+
+    elif args.mode == "batch_collect":
+        # Retrieve results from last submitted batch
+        batch_id = getattr(args, "batch_id", None) or get_pending_batch(conn)
+        if not batch_id:
+            logger.error("No pending batch found. Run batch_submit first.")
+        else:
+            result = collect_batch(batch_id, conn, config, dry_run=args.dry_run)
+            logger.info(f"Batch collect result: {result}")
+
+    elif args.mode == "feedback":
         count = process_feedback(conn, config)
         logger.info(f"Processed {count} feedback items")
 
