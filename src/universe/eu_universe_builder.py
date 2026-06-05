@@ -289,31 +289,55 @@ def _fetch_xetra_live() -> list[tuple[str, str]]:
         except Exception as e:
             logger.debug(f"DB index API failed for {index}: {e}")
 
-    # Strategy 2: Wikipedia index tables (very reliable, well-maintained)
-    wiki_indices = [
-        ("DAX", "DAX"), ("MDAX", "MDAX"), ("SDAX", "SDAX"),
-        ("TecDAX", "TecDAX"), ("SDAX", "SDAX"),
-    ]
-    for wiki_page, _ in wiki_indices:
+    # Strategy 2: Wikipedia index tables via HTML (more reliable than wikitext)
+    import re
+    wiki_pages = ["DAX", "MDAX", "SDAX", "TecDAX"]
+    for wiki_page in wiki_pages:
         try:
             resp = requests.get(
-                "https://en.wikipedia.org/w/api.php",
-                params={"action": "parse", "page": wiki_page,
-                        "prop": "wikitext", "format": "json"},
+                f"https://en.wikipedia.org/wiki/{wiki_page}",
                 headers=headers, timeout=15
             )
             if resp.status_code != 200:
                 continue
-            text = resp.json().get("parse", {}).get("wikitext", {}).get("*", "")
-            # Extract ticker | name patterns from wikitext tables
-            import re
-            for match in re.finditer(r'\|\s*([A-Z0-9]{2,6})\s*\|\|\s*([^\|\n\]]{5,60})', text):
-                sym, name = match.group(1).strip(), match.group(2).strip()
-                if sym and name and sym not in seen and not sym.startswith("ISI"):
-                    seen.add(sym)
-                    results.append((sym, name))
+            from bs4 import BeautifulSoup
+            soup = BeautifulSoup(resp.text, "lxml")
+            # Wikipedia index tables: look for wikitable rows with ticker symbols
+            for table in soup.select("table.wikitable"):
+                headers_row = table.select("th")
+                header_texts = [th.get_text(strip=True).lower() for th in headers_row]
+                # Find ticker column index
+                ticker_col = next((i for i, h in enumerate(header_texts)
+                                   if any(k in h for k in ["ticker", "symbol", "kürzel", "isin"])), None)
+                name_col = next((i for i, h in enumerate(header_texts)
+                                 if any(k in h for k in ["company", "name", "unternehmen"])), 0)
+                for row in table.select("tr")[1:]:
+                    cells = row.select("td")
+                    if not cells:
+                        continue
+                    name = cells[name_col].get_text(strip=True) if name_col < len(cells) else ""
+                    # Extract ticker: prefer known column, else find 2-6 uppercase chars
+                    sym = ""
+                    if ticker_col is not None and ticker_col < len(cells):
+                        sym = cells[ticker_col].get_text(strip=True)
+                    if not sym or not re.match(r'^[A-Z0-9]{2,6}$', sym):
+                        # Try to find ticker in any cell
+                        for cell in cells:
+                            t = cell.get_text(strip=True)
+                            if re.match(r'^[A-Z]{2,6}[0-9]?$', t) and t not in seen:
+                                sym = t
+                                break
+                    name = re.sub(r'\[.*?\]', '', name).strip()
+                    # Filter out noise: currency codes, generic words, too short
+                    noise = {"EUR", "USD", "GBP", "CHF", "TBD", "AG", "SE", "N/A", "NA"}
+                    if (sym and name and len(name) > 3
+                            and re.match(r'^[A-Z]{2,6}[0-9]?$', sym)
+                            and sym not in seen
+                            and sym not in noise):
+                        seen.add(sym)
+                        results.append((sym, name))
         except Exception as e:
-            logger.debug(f"Wikipedia fetch failed for {wiki_page}: {e}")
+            logger.debug(f"Wikipedia HTML fetch failed for {wiki_page}: {e}")
 
     logger.info(f"XETRA live fetch: {len(results)} unique tickers")
     return results
