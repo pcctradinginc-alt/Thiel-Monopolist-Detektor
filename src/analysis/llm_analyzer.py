@@ -34,25 +34,32 @@ except ImportError:
 
 
 # ─── Prompts ────────────────────────────────────────────────────────────────
+#
+# Each prompt is split into two parts:
+#   _STATIC  — instructions, criteria, output schema (same for every company → cached)
+#   _DYNAMIC — company-specific data (changes per call → not cached)
+#
+# Anthropic charges cache_write once (first call) and ~10% of normal input price
+# for cache_read on all subsequent calls within the 5-minute TTL window.
+# With ~500 companies per run the static parts are read 499× from cache.
 
-HYPOTHESIS_PROMPT = """You are analyzing a company's SEC filing to identify if it might be a hidden monopolist in the sense Peter Thiel describes in Zero to One.
+# ── Step 1 ──────────────────────────────────────────────────────────────────
 
-Thiel's key insight: Real monopolists disguise themselves by claiming to operate in large, competitive markets. They actually dominate a narrow, specific problem space where substitutes are poor.
+_HYPOTHESIS_STATIC = """\
+You are analyzing a company's SEC filing to identify if it might be a hidden monopolist \
+in the sense Peter Thiel describes in Zero to One.
+
+Thiel's key insight: Real monopolists disguise themselves by claiming to operate in large, \
+competitive markets. They actually dominate a narrow, specific problem space where substitutes are poor.
 
 Your task (Step 1 of 3): Generate narrow market hypotheses ONLY. Do not score or evaluate yet.
 
-Company: {ticker}
-Business Description: {business_description}
-Risk Factors (excerpt): {risk_factors}
-MD&A (excerpt): {mda}
-Financial Signals: {financial_signals}
-
 Return ONLY valid JSON, no other text:
 
-{{
+{
   "company_claimed_market": "The broad market the company claims to operate in",
   "narrow_market_hypotheses": [
-    {{
+    {
       "narrow_market": "The specific, narrow problem space where this company might actually dominate",
       "why_narrow": "Why this is a genuinely narrow definition, not the company's broad claim",
       "customer_pain_point": "The specific problem this solves better than alternatives",
@@ -60,29 +67,36 @@ Return ONLY valid JSON, no other text:
       "possible_substitutes": ["list", "of", "realistic", "alternatives"],
       "expansion_path": "How this narrow position could expand to a larger market",
       "confidence": "high/medium/low"
-    }}
+    }
   ],
   "red_flags_against_hypothesis": ["reasons why this might NOT be a real narrow market"],
   "data_gaps": ["what information would confirm or deny these hypotheses"]
-}}"""
+}"""
 
+_HYPOTHESIS_DYNAMIC = """\
 
-SUBSTITUTE_PROMPT = """You are performing Step 2 of a Thiel monopoly analysis for {ticker}.
-
-Established hypotheses about their narrow market:
-{hypotheses}
-
+--- COMPANY DATA ---
+Company: {ticker}
 Business Description: {business_description}
-Financial Signals: {financial_signals}
+Risk Factors (excerpt): {risk_factors}
+MD&A (excerpt): {mda}
+Financial Signals: {financial_signals}"""
 
-Peter Thiel's test: A true monopolist has NO close substitute. Customers stay not because of loyalty but because switching is genuinely costly or impossible.
+
+# ── Step 2 ──────────────────────────────────────────────────────────────────
+
+_SUBSTITUTE_STATIC = """\
+You are performing Step 2 of a Thiel monopoly analysis.
+
+Peter Thiel's test: A true monopolist has NO close substitute. Customers stay not because \
+of loyalty but because switching is genuinely costly or impossible.
 
 Analyze substitutes rigorously. Be SKEPTICAL — most companies have more competition than they admit.
 
 Return ONLY valid JSON:
 
-{{
-  "substitute_analysis": {{
+{
+  "substitute_analysis": {
     "primary_substitute": "The single most realistic alternative for customers",
     "substitute_type": "One of: direct_competitor, internal_tool, manual_process, legacy_system, open_source, build_own",
     "switching_cost_estimate": "high/medium/low",
@@ -92,31 +106,28 @@ Return ONLY valid JSON:
     "customer_lock_in_counterevidence": ["concrete evidence that lock-in might be weaker than claimed"],
     "substitute_gap_verdict": "strong/moderate/weak/unclear",
     "substitute_gap_reasoning": "2-3 sentence explanation"
-  }},
-  "pricing_power_signals": {{
+  },
+  "pricing_power_signals": {
     "revenue_per_customer_trend": "rising/stable/falling/unknown",
     "sm_efficiency_trend": "improving/stable/declining/unknown",
     "gross_margin_trend": "rising/stable/falling/unknown",
     "pricing_power_verdict": "strong/moderate/weak/unclear"
-  }}
-}}"""
+  }
+}"""
 
+_SUBSTITUTE_DYNAMIC = """\
 
-AUDIT_PROMPT = """You are performing Step 3 (final audit) of a Thiel monopoly analysis.
-
+--- COMPANY DATA ---
 Company: {ticker}
-Filing date: {filing_date}
-
-CONTEXT FROM PREVIOUS STEPS:
-Market Hypotheses: {hypotheses}
-Substitute Analysis: {substitute_analysis}
-
-FULL FILING DATA:
+Narrow Market Hypotheses: {hypotheses}
 Business Description: {business_description}
-Risk Factors: {risk_factors}
-Financial Signals: {financial_signals}
-Lock-in Keywords Found: {lock_in_keywords}
-Contradiction Signal Detected: {has_contradiction}
+Financial Signals: {financial_signals}"""
+
+
+# ── Step 3 ──────────────────────────────────────────────────────────────────
+
+_AUDIT_STATIC = """\
+You are performing Step 3 (final audit) of a Thiel monopoly analysis.
 
 Peter Thiel's 4 criteria (from Zero to One):
 1. PROPRIETARY TECHNOLOGY: Must be at least 10x better than closest substitute in some important dimension
@@ -130,64 +141,72 @@ A good counter-evidence section is as important as evidence.
 
 Return ONLY valid JSON, no other text:
 
-{{
-  "ticker": "{ticker}",
+{
+  "ticker": "<ticker>",
   "evaluation_summary": "2-3 sentence honest summary of what this company is and why it might or might not be a Thiel monopolist",
-  
-  "criteria": {{
-    "proprietary_technology": {{
+  "criteria": {
+    "proprietary_technology": {
       "evidence": ["specific quotes or data points supporting 10x advantage"],
       "counter_evidence": ["specific reasons why technology advantage might be weaker than claimed"],
       "score": 0,
       "score_reasoning": "why this score (0-100)"
-    }},
-    "network_effects": {{
+    },
+    "network_effects": {
       "evidence": ["specific evidence of network effects"],
       "counter_evidence": ["reasons network effects might be weak or absent"],
       "score": 0,
       "score_reasoning": "why this score (0-100)"
-    }},
-    "economies_of_scale": {{
+    },
+    "economies_of_scale": {
       "evidence": ["evidence of scale advantages: margin trends, cost structure"],
       "counter_evidence": ["reasons scale advantages might be limited"],
       "score": 0,
       "score_reasoning": "why this score (0-100)"
-    }},
-    "branding": {{
+    },
+    "branding": {
       "evidence": ["evidence of genuine brand moat"],
       "counter_evidence": ["reasons branding might not be a durable moat here"],
       "score": 0,
       "score_reasoning": "why this score (0-100)"
-    }}
-  }},
-  
-  "contradiction_analysis": {{
+    }
+  },
+  "contradiction_analysis": {
     "risk_factors_claim": "What risk factors say about competition",
     "business_desc_reality": "What business description reveals about actual positioning",
     "financial_signal_verdict": "What the numbers suggest",
     "contradiction_strength": "strong/moderate/weak/none"
-  }},
-  
-  "scores": {{
+  },
+  "scores": {
     "monopoly_score": 0,
     "monopoly_score_reasoning": "why this score (0-100): weighted average of criteria + substitute gap",
     "confidence_score": 0,
     "confidence_score_reasoning": "how certain the system is given available data (0-100)",
     "data_quality_score": 0,
     "data_quality_score_reasoning": "completeness of available data (0-100)"
-  }},
-  
+  },
   "alert_type": null,
   "alert_reasoning": "why this alert type was chosen, or why no alert",
-  
   "next_verification_steps": ["what a human analyst should check next to confirm or deny this thesis"],
   "status": "STRONG/PARTIAL/WEAK/NONE"
-}}
+}
 
 For alert_type, use ONE of these if monopoly_score > 65, otherwise null:
 HIDDEN_WEDGE_DETECTED, SUBSTITUTE_GAP_DETECTED, LOCK_IN_STRENGTHENING,
 SCALE_INFLECTION, CUSTOMER_EXPANSION_SIGNAL, IPO_WITH_NARROW_DOMINANCE,
 MOAT_EVIDENCE_IMPROVED, MOAT_RISK_DETECTED"""
+
+_AUDIT_DYNAMIC = """\
+
+--- COMPANY DATA ---
+Company: {ticker}
+Filing date: {filing_date}
+Market Hypotheses: {hypotheses}
+Substitute Analysis: {substitute_analysis}
+Business Description: {business_description}
+Risk Factors: {risk_factors}
+Financial Signals: {financial_signals}
+Lock-in Keywords Found: {lock_in_keywords}
+Contradiction Signal Detected: {has_contradiction}"""
 
 
 # ─── Rate Limiter ────────────────────────────────────────────────────────────
@@ -232,30 +251,42 @@ _rate_limiter = RateLimiter()
     wait=wait_exponential(multiplier=2, min=4, max=60),
     retry=retry_if_exception_type(Exception)
 )
-def _call_llm(client, model: str, prompt: str, max_tokens: int = 2000) -> dict:
-    """Single LLM call with retry and rate limiting."""
-    _rate_limiter.wait_if_needed(estimated_tokens=len(prompt) // 4)
+def _call_llm(client, model: str, static_part: str, dynamic_part: str,
+              max_tokens: int = 2000) -> dict:
+    """
+    Single LLM call with retry, rate limiting, and prompt caching.
+    static_part is marked ephemeral so Anthropic caches it across the run.
+    dynamic_part contains company-specific data and is never cached.
+    """
+    _rate_limiter.wait_if_needed(estimated_tokens=(len(static_part) + len(dynamic_part)) // 4)
 
     response = client.messages.create(
         model=model,
         max_tokens=max_tokens,
-        messages=[{"role": "user", "content": prompt}]
+        messages=[{
+            "role": "user",
+            "content": [
+                {"type": "text", "text": static_part,
+                 "cache_control": {"type": "ephemeral"}},
+                {"type": "text", "text": dynamic_part},
+            ],
+        }]
     )
 
-    content = response.content[0].text.strip()
+    raw = response.content[0].text.strip()
+    if raw.startswith("```"):
+        raw = raw.split("```")[1]
+        if raw.startswith("json"):
+            raw = raw[4:]
+        raw = raw.strip()
 
-    # Strip markdown code fences if present
-    if content.startswith("```"):
-        content = content.split("```")[1]
-        if content.startswith("json"):
-            content = content[4:]
-        content = content.strip()
-
-    parsed = json.loads(content)
+    parsed = json.loads(raw)
     return {
         "result": parsed,
         "input_tokens": response.usage.input_tokens,
-        "output_tokens": response.usage.output_tokens
+        "output_tokens": response.usage.output_tokens,
+        "cache_read_tokens": getattr(response.usage, "cache_read_input_tokens", 0) or 0,
+        "cache_created_tokens": getattr(response.usage, "cache_creation_input_tokens", 0) or 0,
     }
 
 
@@ -287,17 +318,19 @@ def analyze_company(
     # ── Step 1: Market Hypothesis Generation ──
     logger.info(f"{ticker}: Step 1 — generating market hypotheses")
     try:
-        h_prompt = HYPOTHESIS_PROMPT.format(
-            ticker=ticker,
-            business_description=biz_desc,
-            risk_factors=risk_factors,
-            mda=mda,
-            financial_signals=signals_str
+        h_result = _call_llm(
+            client, model_screening,
+            static_part=_HYPOTHESIS_STATIC,
+            dynamic_part=_HYPOTHESIS_DYNAMIC.format(
+                ticker=ticker, business_description=biz_desc,
+                risk_factors=risk_factors, mda=mda, financial_signals=signals_str,
+            ),
+            max_tokens=1500,
         )
-        h_result = _call_llm(client, model_screening, h_prompt, max_tokens=1500)
         hypotheses = h_result["result"]
         total_input_tokens += h_result["input_tokens"]
         total_output_tokens += h_result["output_tokens"]
+        logger.debug(f"{ticker}: Step 1 cache_read={h_result['cache_read_tokens']}")
     except Exception as e:
         logger.error(f"{ticker}: Hypothesis step failed: {e}")
         return {"error": str(e), "ticker": ticker, "step_failed": "hypothesis"}
@@ -305,43 +338,51 @@ def analyze_company(
     # ── Step 2: Substitute Analysis ──
     logger.info(f"{ticker}: Step 2 — substitute analysis")
     try:
-        s_prompt = SUBSTITUTE_PROMPT.format(
-            ticker=ticker,
-            hypotheses=json.dumps(hypotheses, indent=2)[:2000],
-            business_description=biz_desc,
-            financial_signals=signals_str
+        s_result = _call_llm(
+            client, model_screening,
+            static_part=_SUBSTITUTE_STATIC,
+            dynamic_part=_SUBSTITUTE_DYNAMIC.format(
+                ticker=ticker,
+                hypotheses=json.dumps(hypotheses, indent=2)[:2000],
+                business_description=biz_desc,
+                financial_signals=signals_str,
+            ),
+            max_tokens=1200,
         )
-        s_result = _call_llm(client, model_screening, s_prompt, max_tokens=1200)
         substitute_analysis = s_result["result"]
         total_input_tokens += s_result["input_tokens"]
         total_output_tokens += s_result["output_tokens"]
+        logger.debug(f"{ticker}: Step 2 cache_read={s_result['cache_read_tokens']}")
     except Exception as e:
         logger.error(f"{ticker}: Substitute step failed: {e}")
         substitute_analysis = {}
 
-    # ── Step 3: Final Audit (with stronger model for final candidates) ──
+    # ── Step 3: Final Audit (stronger model only for strong/moderate substitute gap) ──
     logger.info(f"{ticker}: Step 3 — final audit")
     try:
-        # Determine if this warrants the stronger model
         sub_verdict = substitute_analysis.get("substitute_analysis", {}).get("substitute_gap_verdict", "")
-        use_strong_model = sub_verdict in ["strong", "moderate"]
-        model = model_final if use_strong_model else model_screening
+        model = model_final if sub_verdict in ("strong", "moderate") else model_screening
 
-        a_prompt = AUDIT_PROMPT.format(
-            ticker=ticker,
-            filing_date=filing_data.get("filing_date", "unknown"),
-            hypotheses=json.dumps(hypotheses.get("narrow_market_hypotheses", [])[:2], indent=2)[:1500],
-            substitute_analysis=json.dumps(substitute_analysis, indent=2)[:1500],
-            business_description=biz_desc,
-            risk_factors=risk_factors,
-            financial_signals=signals_str,
-            lock_in_keywords=str(filing_data.get("lock_in_keyword_hits", [])[:15]),
-            has_contradiction=filing_data.get("has_contradiction_signal", False)
+        a_result = _call_llm(
+            client, model,
+            static_part=_AUDIT_STATIC,
+            dynamic_part=_AUDIT_DYNAMIC.format(
+                ticker=ticker,
+                filing_date=filing_data.get("filing_date", "unknown"),
+                hypotheses=json.dumps(hypotheses.get("narrow_market_hypotheses", [])[:2], indent=2)[:1500],
+                substitute_analysis=json.dumps(substitute_analysis, indent=2)[:1500],
+                business_description=biz_desc,
+                risk_factors=risk_factors,
+                financial_signals=signals_str,
+                lock_in_keywords=str(filing_data.get("lock_in_keyword_hits", [])[:15]),
+                has_contradiction=filing_data.get("has_contradiction_signal", False),
+            ),
+            max_tokens=2500,
         )
-        a_result = _call_llm(client, model, a_prompt, max_tokens=2500)
         assessment = a_result["result"]
         total_input_tokens += a_result["input_tokens"]
         total_output_tokens += a_result["output_tokens"]
+        logger.debug(f"{ticker}: Step 3 cache_read={a_result['cache_read_tokens']}")
     except Exception as e:
         logger.error(f"{ticker}: Audit step failed: {e}")
         assessment = {"error": str(e)}

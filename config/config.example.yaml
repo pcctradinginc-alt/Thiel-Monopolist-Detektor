@@ -40,15 +40,15 @@ universe:
 
 screening:
   # LLM-Konfiguration
-  model_screening: "claude-haiku-4-5"
-  model_final: "claude-sonnet-4-5"
+  model_screening: "claude-haiku-4-5-20251001"
+  model_final: "claude-sonnet-4-6"
   max_calls_per_run: 150
   max_input_tokens_per_call: 12000
   rate_limit_rpm: 40
   rate_limit_tpm: 400000
 
   # Scoring-Schwellen
-  min_score_for_llm_call: 20        # Lane-Score ab dem LLM aufgerufen wird
+  min_score_for_llm_call: 40        # Lane-Score ab dem LLM aufgerufen wird
   min_monopoly_score_alert: 65      # Minimum monopoly_score für Alert
   min_confidence_score_alert: 60    # Minimum confidence_score für Alert
   min_data_quality_score_alert: 55  # Minimum data_quality_score für Alert
