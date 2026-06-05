@@ -1,0 +1,23 @@
+name: Deploy Cloudflare Worker
+
+on:
+  workflow_dispatch:  # Manuell auslösen
+
+jobs:
+  deploy:
+    name: Deploy to Cloudflare Workers
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy Worker
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          workingDirectory: cloudflare-worker
+          secrets: |
+            GITHUB_TOKEN
+            WEBHOOK_SECRET
+        env:
+          GITHUB_TOKEN: ${{ secrets.FEEDBACK_GITHUB_TOKEN }}
+          WEBHOOK_SECRET: ${{ secrets.WEBHOOK_SECRET }}
