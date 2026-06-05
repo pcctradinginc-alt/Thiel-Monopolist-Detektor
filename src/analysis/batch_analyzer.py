@@ -253,16 +253,20 @@ def collect_batch(batch_id: str, conn, config: dict, dry_run: bool = False) -> d
     # may be empty. We bulk-insert all tickers before processing results.
     now_iso = datetime.now(timezone.utc).isoformat()
     try:
+        # Temporarily disable FK checks for bulk pre-registration
+        conn.execute("PRAGMA foreign_keys=OFF")
         for req_result in client.beta.messages.batches.results(batch_id):
             t = req_result.custom_id
             conn.execute("""
                 INSERT OR IGNORE INTO companies
                 (ticker, name, cohort_id, first_seen_in_universe, is_active)
-                VALUES (?, ?, 'batch', ?, 1)
+                VALUES (?, ?, NULL, ?, 1)
             """, (t, t, now_iso))
         conn.commit()
+        conn.execute("PRAGMA foreign_keys=ON")
         logger.info("Pre-registered all batch tickers into companies table")
     except Exception as e:
+        conn.execute("PRAGMA foreign_keys=ON")
         logger.warning(f"Ticker pre-registration failed: {e}")
 
     summary = {"processed": 0, "failed": 0, "alerted": 0, "batch_id": batch_id}
