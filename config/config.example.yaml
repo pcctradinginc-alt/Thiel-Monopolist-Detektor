@@ -107,10 +107,11 @@ alerts:
 eu_universe:
   enabled: true                   # EU-Universe aktiv (yfinance Pre-Filter + Bundesanzeiger)
   exchanges:
-    - xetra                       # XETRA (DE): DAX/MDAX/SDAX/TecDAX + weitere
+    - xetra                       # XETRA (DE): live ~600 via DB API + Seeds
     - six                         # SIX Swiss Exchange (CH)
-    - aex                         # Euronext Amsterdam (NL)
+    - aex                         # Euronext Amsterdam (NL): live via Euronext API
     - vienna                      # Wiener Börse (AT)
+    - paris                       # Euronext Paris (FR): CAC40 + SBF120
   min_market_cap_m: 50            # Small Caps einschließen (€50M+)
   eulerpool_api_key_env: "EULERPOOL_API_KEY"
   # Pre-Filter Schwellen (yfinance, kostenlos)

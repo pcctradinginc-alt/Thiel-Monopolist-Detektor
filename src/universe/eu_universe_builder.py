@@ -217,63 +217,158 @@ EXCHANGES = {
         "min_market_cap_m": 30,
         "country": "AT",
     },
+    "paris": {
+        "suffix": ".PA",
+        "seeds": [
+            # CAC 40 + SBF 120 highlights (high Thiel potential)
+            ("AI", "Air Liquide SA"), ("AIR", "Airbus SE"), ("ALO", "Alstom SA"),
+            ("ATO", "Atos SE"), ("AXA", "AXA SA"), ("BN", "Danone SA"),
+            ("BNP", "BNP Paribas SA"), ("CA", "Carrefour SA"), ("CAP", "Capgemini SE"),
+            ("CS", "AXA SA"), ("DSY", "Dassault Systemes SE"), ("ENGI", "Engie SA"),
+            ("EDEN", "Edenred SE"), ("ERF", "Eurofins Scientific SE"),
+            ("GLE", "Societe Generale SA"), ("HO", "Thales SA"), ("KER", "Kering SA"),
+            ("LR", "Legrand SA"), ("MC", "LVMH Moet Hennessy SE"), ("ML", "Michelin SA"),
+            ("OR", "L'Oreal SA"), ("ORA", "Orange SA"), ("PUB", "Publicis Groupe SA"),
+            ("RMS", "Hermes International SCA"), ("SAF", "Safran SA"),
+            ("SAN", "Sanofi SA"), ("SGO", "Compagnie de Saint-Gobain SA"),
+            ("STLAM", "Stellantis NV"), ("SU", "Schneider Electric SE"),
+            ("TTE", "TotalEnergies SE"), ("VIE", "Veolia Environnement SA"),
+            ("VIV", "Vivendi SE"), ("WLN", "Worldline SA"),
+            # SBF 120 additions
+            ("ALFEN", "Alfen NV"), ("ALSTEF", "Alstef Group"),
+            ("AMUN", "Amundi SA"), ("APAM", "Aperam SA"),
+            ("BFCM", "Credit Mutuel SA"), ("BIOC", "Biocartis Group NV"),
+            ("COFA", "Coface SA"), ("CRDI", "Credit Agricole SA"),
+            ("DBV", "DBV Technologies SA"), ("DDOG", "Datadog (Paris)"),
+            ("EDF", "Electricite de France SA"), ("ELIS", "Elis SA"),
+            ("FDJ", "Francaise des Jeux SA"), ("FTI", "TechnipFMC PLC"),
+            ("GTT", "GTT SA"), ("ITRK", "Intertek Group (Paris)"),
+            ("KOF", "Korian SA"), ("LHN", "LafargeHolcim Ltd"),
+            ("NEOEN", "Neoen SA"), ("NEXITY", "Nexity SA"),
+            ("NOKIA", "Nokia Oyj (Paris)"), ("OPM", "OPmobility SE"),
+            ("PARRO", "Parrot SA"), ("PERNOD", "Pernod Ricard SA"),
+            ("POOL", "Poolia AB (Paris)"), ("REXEL", "Rexel SA"),
+            ("RNO", "Renault SA"), ("SCOR", "SCOR SE"),
+            ("SOI", "Soitec SA"), ("SPIE", "SPIE SA"),
+            ("STM", "STMicroelectronics NV"), ("TKTT", "Tikehau Capital"),
+            ("VLTSA", "Vallourec SA"), ("VK", "Voltalia SA"),
+        ],
+        "min_market_cap_m": 100,
+        "country": "FR",
+    },
 }
 
 
 # ─── Live Index Fetch (best-effort, falls back to seeds) ─────────────────────
 
-def _fetch_dax_components() -> list[tuple[str, str]]:
+def _fetch_xetra_live() -> list[tuple[str, str]]:
     """
-    Try to fetch current DAX/MDAX/SDAX/TecDAX components from Deutsche Boerse
-    public data. Returns list of (ticker, name) or empty list on failure.
+    Fetch all XETRA-listed equities from Deutsche Börse's public instruments
+    reference data. Falls back to index components if bulk download fails.
+    Returns list of (base_ticker, name).
     """
-    url = "https://api.deutsche-boerse.com/prod/v1/indices/components"
-    indices = ["DAX", "MDAX", "SDAX", "TECDAX"]
     results = []
-    headers = {"User-Agent": "ThielDetector contact@example.com"}
+    headers = {"User-Agent": "ThielDetector info@pcctradinginc.com"}
 
+    # Strategy 1: Deutsche Börse index components API (reliable, ~600 stocks)
+    indices = ["DAX", "MDAX", "SDAX", "TECDAX", "SDAX"]
+    index_url = "https://api.deutsche-boerse.com/prod/v1/indices/components"
+    seen = set()
     for index in indices:
         try:
+            resp = requests.get(index_url, params={"index": index},
+                                headers=headers, timeout=15)
+            if resp.status_code == 200:
+                for item in resp.json().get("data", []):
+                    sym = item.get("symbol", "")
+                    name = item.get("name", "")
+                    if sym and name and sym not in seen:
+                        seen.add(sym)
+                        results.append((sym, name))
+                logger.info(f"Deutsche Börse {index}: {len(results)} total so far")
+        except Exception as e:
+            logger.debug(f"DB index API failed for {index}: {e}")
+
+    # Strategy 2: Wikipedia index tables (very reliable, well-maintained)
+    wiki_indices = [
+        ("DAX", "DAX"), ("MDAX", "MDAX"), ("SDAX", "SDAX"),
+        ("TecDAX", "TecDAX"), ("SDAX", "SDAX"),
+    ]
+    for wiki_page, _ in wiki_indices:
+        try:
             resp = requests.get(
-                url,
-                params={"index": index},
-                headers=headers,
-                timeout=15,
+                "https://en.wikipedia.org/w/api.php",
+                params={"action": "parse", "page": wiki_page,
+                        "prop": "wikitext", "format": "json"},
+                headers=headers, timeout=15
             )
+            if resp.status_code != 200:
+                continue
+            text = resp.json().get("parse", {}).get("wikitext", {}).get("*", "")
+            # Extract ticker | name patterns from wikitext tables
+            import re
+            for match in re.finditer(r'\|\s*([A-Z0-9]{2,6})\s*\|\|\s*([^\|\n\]]{5,60})', text):
+                sym, name = match.group(1).strip(), match.group(2).strip()
+                if sym and name and sym not in seen and not sym.startswith("ISI"):
+                    seen.add(sym)
+                    results.append((sym, name))
+        except Exception as e:
+            logger.debug(f"Wikipedia fetch failed for {wiki_page}: {e}")
+
+    logger.info(f"XETRA live fetch: {len(results)} unique tickers")
+    return results
+
+
+def _fetch_euronext_live(mics: list[str], suffix_map: dict) -> list[tuple[str, str, str]]:
+    """
+    Fetch equities from Euronext markets via their public data service.
+    Returns list of (base_ticker, name, exchange_suffix).
+    mics: list of MIC codes e.g. ["XAMS", "XPAR"]
+    suffix_map: {mic: yfinance_suffix} e.g. {"XAMS": ".AS", "XPAR": ".PA"}
+    """
+    results = []
+    headers = {"User-Agent": "ThielDetector info@pcctradinginc.com"}
+
+    for mic in mics:
+        suffix = suffix_map.get(mic, ".AS")
+        try:
+            # Euronext public product list (paginated JSON)
+            url = f"https://live.euronext.com/en/pd_ajax/stocks?mics={mic}&start=0&length=2000"
+            resp = requests.get(url, headers={
+                **headers,
+                "Accept": "application/json",
+                "X-Requested-With": "XMLHttpRequest",
+                "Referer": "https://live.euronext.com/en/products/equities/list",
+            }, timeout=20)
+
             if resp.status_code == 200:
                 data = resp.json()
                 for item in data.get("data", []):
-                    ticker = item.get("isin") or item.get("symbol", "")
-                    name = item.get("name", "")
-                    if ticker and name:
-                        results.append((ticker, name))
+                    # Euronext returns HTML fragments — extract ticker from link
+                    import re
+                    ticker_match = re.search(r'>([A-Z0-9]{2,8})<', str(item))
+                    name_match = re.search(r'<td[^>]*>([^<]{5,60})</td>', str(item))
+                    if ticker_match:
+                        ticker = ticker_match.group(1)
+                        name = name_match.group(1).strip() if name_match else ticker
+                        results.append((ticker, name, suffix))
+                logger.info(f"Euronext {mic}: fetched {len([r for r in results if r[2]==suffix])} tickers")
+            else:
+                logger.debug(f"Euronext {mic} HTTP {resp.status_code}")
         except Exception as e:
-            logger.debug(f"Deutsche Boerse API failed for {index}: {e}")
+            logger.debug(f"Euronext {mic} fetch failed: {e}")
 
     return results
 
 
+def _fetch_dax_components() -> list[tuple[str, str]]:
+    """Legacy wrapper — calls _fetch_xetra_live."""
+    return _fetch_xetra_live()
+
+
 def _fetch_stoxx_components() -> list[tuple[str, str]]:
-    """
-    Try to fetch EURO STOXX components from public sources.
-    Returns list of (ticker, name) or empty list on failure.
-    """
-    # Fallback: use Wikipedia EURO STOXX 600 list via a public API
-    try:
-        resp = requests.get(
-            "https://en.wikipedia.org/w/api.php",
-            params={
-                "action": "parse",
-                "page": "EURO_STOXX_600",
-                "prop": "wikitext",
-                "format": "json",
-            },
-            timeout=15,
-        )
-        # Parsing wikitext is complex — skip and use seeds
-        return []
-    except Exception:
-        return []
+    """Legacy stub — kept for compatibility."""
+    return []
 
 
 # ─── Main Builder ────────────────────────────────────────────────────────────
@@ -308,14 +403,20 @@ def build_eu_universe(config: dict, conn) -> list[dict]:
         # Try to enrich with live data — fall back to seeds
         live_tickers = []
         if exchange_id == "xetra":
-            live_tickers = _fetch_dax_components()
+            live_tickers = _fetch_xetra_live()
+        elif exchange_id == "aex":
+            euronext_results = _fetch_euronext_live(["XAMS"], {"XAMS": ".AS"})
+            live_tickers = [(t, n) for t, n, _ in euronext_results]
+        elif exchange_id == "paris":
+            euronext_results = _fetch_euronext_live(["XPAR"], {"XPAR": ".PA"})
+            live_tickers = [(t, n) for t, n, _ in euronext_results]
 
         all_seeds = seeds
         if live_tickers:
             existing_base = {t for t, _ in seeds}
             new_tickers = [(t, n) for t, n in live_tickers if t not in existing_base]
             all_seeds = seeds + new_tickers
-            logger.info(f"{exchange_id}: {len(new_tickers)} live tickers added to seeds")
+            logger.info(f"{exchange_id}: {len(new_tickers)} live tickers added to {len(seeds)} seeds → {len(all_seeds)} total")
 
         for base_ticker, name in all_seeds:
             full_ticker = f"{base_ticker}{suffix}"
