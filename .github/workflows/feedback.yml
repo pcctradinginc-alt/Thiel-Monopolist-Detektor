@@ -1,0 +1,67 @@
+name: Process Human Feedback
+
+on:
+  issues:
+    types: [labeled]
+  schedule:
+    - cron: '0 8 * * 3'  # Every Wednesday at 08:00 UTC
+  workflow_dispatch:
+
+jobs:
+  process-feedback:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    # Only run if a feedback label was applied
+    if: |
+      github.event_name != 'issues' ||
+      contains(fromJSON('["confirmed","rejected","watchlist","too-early"]'), github.event.label.name)
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Restore database
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p data
+          LATEST=$(gh release view --json tagName -q .tagName 2>/dev/null || echo "")
+          if [ -n "$LATEST" ]; then
+            gh release download "$LATEST" -p "thiel_detector.db" -D data/ 2>/dev/null && \
+              echo "✓ Database restored" || echo "No database found"
+          fi
+
+      - name: Copy config
+        run: |
+          if [ ! -f config/config.yaml ]; then
+            cp config/config.example.yaml config/config.yaml
+          fi
+
+      - name: Process feedback
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python src/main.py --mode feedback
+
+      - name: Save updated database
+        if: always()
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ -f data/thiel_detector.db ]; then
+            DATE=$(date +%Y-%m-%d)
+            gh release upload "db-$DATE" data/thiel_detector.db --clobber 2>/dev/null || \
+            echo "Upload failed"
+          fi

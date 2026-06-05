@@ -1,0 +1,115 @@
+# Thiel Monopolist Detector — Konfiguration
+# Kopiere diese Datei nach config.yaml und passe sie an
+
+universe:
+  # Harte Filter (alles andere ist nur Ranking)
+  min_avg_daily_volume: 10000
+  exclude_types:
+    - ETF
+    - Fund
+    - Warrant
+    - Preferred
+    - Unit
+    - ADR
+
+  # Startkohorten (werden nacheinander freigeschaltet)
+  cohorts:
+    - id: tech_software
+      name: "Tech & Software"
+      sic_codes: ["7370", "7371", "7372", "7374", "7379"]
+      min_market_cap_m: 300
+      alerting_enabled: true
+
+    - id: internet_platform
+      name: "Internet Platforms"
+      sic_codes: ["7375"]
+      min_market_cap_m: 200
+      alerting_enabled: true
+
+    - id: ipo_recent
+      name: "IPOs letzte 36 Monate"
+      ipo_months_back: 36
+      min_market_cap_m: 100
+      alerting_enabled: true
+
+    - id: healthcare_tech
+      name: "Healthcare Technology"
+      sic_codes: ["7372", "8099", "5047"]
+      min_market_cap_m: 300
+      alerting_enabled: false  # Baseline läuft noch
+
+screening:
+  # LLM-Konfiguration
+  model_screening: "claude-haiku-4-5"
+  model_final: "claude-sonnet-4-5"
+  max_calls_per_run: 150
+  max_input_tokens_per_call: 12000
+  rate_limit_rpm: 40
+  rate_limit_tpm: 400000
+
+  # Scoring-Schwellen
+  min_score_for_llm_call: 20        # Lane-Score ab dem LLM aufgerufen wird
+  min_monopoly_score_alert: 65      # Minimum monopoly_score für Alert
+  min_confidence_score_alert: 60    # Minimum confidence_score für Alert
+  min_data_quality_score_alert: 55  # Minimum data_quality_score für Alert
+  min_runs_for_strong: 2            # Wie viele Runs mit hohem Score für "Strong"
+
+  # Candidate Lanes — Gewichtung (kein Ausschluss, nur Ranking)
+  lanes:
+    hidden_wedge:
+      weight: 1.0
+      keywords:
+        - "mission-critical"
+        - "system of record"
+        - "embedded"
+        - "switching costs"
+        - "proprietary data"
+        - "long-term contracts"
+        - "multi-year agreements"
+        - "workflow automation"
+        - "regulatory compliance"
+    emerging_platform:
+      weight: 1.0
+      keywords:
+        - "platform"
+        - "ecosystem"
+        - "marketplace"
+        - "developer community"
+        - "interoperability"
+        - "API"
+        - "integration"
+    scale_inflection:
+      weight: 0.9
+      # Zahlen-basiert: S&M/Rev fällt + Gross Margin steigt
+    ipo_narrow:
+      weight: 0.8
+      # IPOs der letzten 36 Monate mit S-1
+    filing_change:
+      weight: 0.7
+      # Neue Keywords in aktuellem 10-K vs. Vorjahr
+    manual_watchlist:
+      weight: 1.0
+      tickers: []  # Hier manuell Ticker eintragen
+
+alerts:
+  # Alert-Hysterese
+  min_score_delta_for_alert: 8     # Mindestveränderung für erneuten Alert
+  alert_cooldown_days: 21          # Kein zweiter Alert innerhalb von X Tagen
+
+  # Email-Konfiguration (via GitHub Secrets)
+  email_subject_prefix: "[Thiel Detector]"
+
+  # GitHub Issues
+  create_github_issues: true
+  github_repo: "pcctradinginc-alt/Thiel-Monopolist-Detektor"
+
+persistence:
+  # MVP: SQLite lokal + als Release Asset
+  # Prod: Turso (URL + Token via GitHub Secrets)
+  mode: "sqlite"          # "sqlite" oder "turso"
+  sqlite_path: "data/thiel_detector.db"
+
+logging:
+  level: "INFO"
+  log_to_file: true
+  log_path: "logs/run.log"
