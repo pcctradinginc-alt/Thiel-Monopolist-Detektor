@@ -113,6 +113,7 @@ eu_universe:
     - vienna                      # Wiener Börse (AT)
     - paris                       # Euronext Paris (FR): CAC40 + SBF120
   min_market_cap_m: 50            # Small Caps einschließen (€50M+)
+  ipo_months_back: 18             # EU-IPOs der letzten N Monate screenen
   eulerpool_api_key_env: "EULERPOOL_API_KEY"
   # Pre-Filter Schwellen (yfinance, kostenlos)
   prefilter:

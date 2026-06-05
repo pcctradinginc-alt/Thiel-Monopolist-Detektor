@@ -371,6 +371,134 @@ def _fetch_stoxx_components() -> list[tuple[str, str]]:
     return []
 
 
+# ─── EU IPO Fetchers ─────────────────────────────────────────────────────────
+
+def fetch_eu_ipos(months_back: int = 18) -> list[dict]:
+    """
+    Fetch recent EU IPOs from Deutsche Börse and Euronext new listings.
+    Returns list of company dicts ready for the screening pipeline.
+
+    Sources:
+      - Deutsche Börse: neue Zulassungen (XETRA)
+      - Euronext: new listings (AEX + Paris)
+      - BaFin prospectus database (for German IPOs with text)
+
+    months_back: how far back to look for new listings
+    """
+    from datetime import timedelta
+    cutoff = datetime.now(timezone.utc) - timedelta(days=months_back * 30)
+    headers = {"User-Agent": "ThielDetector info@pcctradinginc.com"}
+    ipos = []
+    seen = set()
+
+    # ── Source 1: Deutsche Börse new listings RSS/API ─────────────────────────
+    try:
+        # Deutsche Börse publishes new XETRA listings via their public API
+        resp = requests.get(
+            "https://api.deutsche-boerse.com/prod/v1/instrument/newlistings",
+            params={"limit": 200},
+            headers=headers,
+            timeout=15,
+        )
+        if resp.status_code == 200:
+            for item in resp.json().get("data", []):
+                sym = item.get("symbol", "")
+                name = item.get("name", "")
+                listing_date = item.get("listingDate", "")
+                if sym and sym not in seen:
+                    seen.add(sym)
+                    ipos.append({
+                        "ticker": f"{sym}.DE",
+                        "base_ticker": sym,
+                        "name": name,
+                        "exchange": "xetra",
+                        "exchange_suffix": ".DE",
+                        "cohort_id": "eu_ipo",
+                        "country": "DE",
+                        "source": "ipo",
+                        "ipo_date": listing_date,
+                        "has_prospectus": False,
+                    })
+            logger.info(f"Deutsche Börse new listings: {len(ipos)} IPOs")
+    except Exception as e:
+        logger.debug(f"Deutsche Börse new listings failed: {e}")
+
+    # ── Source 2: Euronext new listings ───────────────────────────────────────
+    for mic, suffix, country in [("XAMS", ".AS", "NL"), ("XPAR", ".PA", "FR")]:
+        try:
+            resp = requests.get(
+                "https://live.euronext.com/en/pd_ajax/ipos",
+                params={"mics": mic, "start": 0, "length": 200},
+                headers={**headers, "X-Requested-With": "XMLHttpRequest"},
+                timeout=15,
+            )
+            if resp.status_code == 200:
+                import re
+                for item in resp.json().get("data", []):
+                    item_str = str(item)
+                    ticker_m = re.search(r'>([A-Z0-9]{2,8})<', item_str)
+                    name_m = re.search(r'<td[^>]*>([^<]{5,60})</td>', item_str)
+                    if ticker_m:
+                        sym = ticker_m.group(1)
+                        full = f"{sym}{suffix}"
+                        if full not in seen:
+                            seen.add(full)
+                            ipos.append({
+                                "ticker": full,
+                                "base_ticker": sym,
+                                "name": name_m.group(1).strip() if name_m else sym,
+                                "exchange": mic.lower(),
+                                "exchange_suffix": suffix,
+                                "cohort_id": "eu_ipo",
+                                "country": country,
+                                "source": "ipo",
+                                "has_prospectus": False,
+                            })
+        except Exception as e:
+            logger.debug(f"Euronext {mic} IPO fetch failed: {e}")
+
+    # ── Source 3: BaFin Prospektdatenbank (German IPO prospectuses) ───────────
+    try:
+        resp = requests.get(
+            "https://www.bafin.de/SiteGlobals/Functions/Prospekte/DE/prospektsuche.html",
+            params={
+                "gtp": "134578_list%3D1",
+                "documentType": "PROSP",
+                "language": "DE",
+                "sorting": "dateOfApproval_dt+desc",
+                "resultsPerPage": "100",
+            },
+            headers=headers,
+            timeout=20,
+        )
+        if resp.status_code == 200:
+            from bs4 import BeautifulSoup
+            soup = BeautifulSoup(resp.text, "lxml")
+            for row in soup.select("table tr")[1:51]:  # top 50 entries
+                cells = row.select("td")
+                if len(cells) >= 3:
+                    name = cells[0].get_text(strip=True)
+                    # BaFin doesn't always have ticker — flag for manual lookup
+                    if name and len(name) > 3:
+                        ipos.append({
+                            "ticker": f"BAFIN_{name[:10].replace(' ','_').upper()}.DE",
+                            "base_ticker": name[:10].replace(' ', '_').upper(),
+                            "name": name,
+                            "exchange": "xetra",
+                            "exchange_suffix": ".DE",
+                            "cohort_id": "eu_ipo_bafin",
+                            "country": "DE",
+                            "source": "bafin_prospectus",
+                            "has_prospectus": True,
+                        })
+            logger.info(f"BaFin prospectus database: added {len([i for i in ipos if i.get('source')=='bafin_prospectus'])} entries")
+    except Exception as e:
+        logger.debug(f"BaFin prospectus fetch failed: {e}")
+
+    logger.info(f"EU IPOs total: {len(ipos)} across all sources")
+    return ipos
+
+
 # ─── Main Builder ────────────────────────────────────────────────────────────
 
 def build_eu_universe(config: dict, conn) -> list[dict]:
@@ -436,7 +564,23 @@ def build_eu_universe(config: dict, conn) -> list[dict]:
                 "source": "seed",
             })
 
-    logger.info(f"EU universe: {len(companies)} candidates across {len(enabled_exchanges)} exchanges")
+    logger.info(f"EU universe (established): {len(companies)} candidates across {len(enabled_exchanges)} exchanges")
+
+    # ── EU IPOs: add recent IPOs as high-priority candidates ─────────────────
+    ipo_months = eu_config.get("ipo_months_back", 18)
+    ipo_candidates = fetch_eu_ipos(months_back=ipo_months)
+    ipo_added = 0
+    for ipo in ipo_candidates:
+        full_ticker = ipo["ticker"]
+        # Skip BaFin entries without real ticker (can't yfinance-lookup them)
+        if ipo.get("source") == "bafin_prospectus":
+            continue
+        if full_ticker not in seen_tickers:
+            seen_tickers.add(full_ticker)
+            companies.append(ipo)
+            ipo_added += 1
+    if ipo_added:
+        logger.info(f"EU IPOs added: {ipo_added} recent listings (last {ipo_months} months)")
 
     # Upsert into DB
     _upsert_eu_companies(conn, companies)

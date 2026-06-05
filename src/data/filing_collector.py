@@ -204,8 +204,8 @@ def fetch_eu_filing_data(ticker: str, company_name: str, exchange: str = "xetra"
         except Exception as e:
             logger.warning(f"{ticker}: yfinance financial signals failed: {e}")
 
-    # Text via Bundesanzeiger (DE companies only)
-    if exchange == "xetra" and company_name:
+    # Text via Bundesanzeiger (DE companies only, including IPO prospectuses)
+    if exchange in ("xetra", "eu_ipo", "eu_ipo_bafin") and company_name:
         from data.bundesanzeiger import fetch_bundesanzeiger_text
         ba_result = fetch_bundesanzeiger_text(company_name, ticker)
         if not ba_result.get("error"):
@@ -496,7 +496,12 @@ def compute_lane_scores(filing_data: dict, config: dict) -> dict:
         total_score += 40
 
     # Lane 4: IPO / Recent Filing
-    if filing_data.get("has_s1") and not filing_data.get("has_10k"):
+    # EU IPOs (source=ipo) get automatic high priority — prospectus analysis
+    # is the single best signal for hidden Thiel moats
+    if filing_data.get("source") == "ipo" or filing_data.get("cohort_id") in ("eu_ipo", "ipo_recent"):
+        lanes["ipo_narrow"] = 80
+        total_score += 80
+    elif filing_data.get("has_s1") and not filing_data.get("has_10k"):
         lanes["ipo_narrow"] = 60
         total_score += 60
     elif filing_data.get("has_s1"):
