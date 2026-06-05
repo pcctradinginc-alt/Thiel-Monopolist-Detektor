@@ -65,7 +65,7 @@ export default {
         `https://api.github.com/repos/${repo}/issues/${issue}/labels`,
         {
           headers: {
-            Authorization: `token ${env.GITHUB_TOKEN}`,
+            Authorization: `token ${env.GH_LABEL_TOKEN}`,
             "User-Agent": "ThielDetector-Worker",
             Accept: "application/vnd.github.v3+json",
           },
@@ -82,7 +82,7 @@ export default {
         {
           method: "PUT",
           headers: {
-            Authorization: `token ${env.GITHUB_TOKEN}`,
+            Authorization: `token ${env.GH_LABEL_TOKEN}`,
             "User-Agent": "ThielDetector-Worker",
             Accept: "application/vnd.github.v3+json",
             "Content-Type": "application/json",
