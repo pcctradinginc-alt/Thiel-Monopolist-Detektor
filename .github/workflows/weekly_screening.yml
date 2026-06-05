@@ -16,9 +16,12 @@ on:
           - batch_collect
           - full
           - status
+      batch_id:
+        description: "Batch ID for manual batch_collect (optional)"
+        required: false
 
 jobs:
-  # ── Sonntag 19:00: Universe bauen, Filing-Daten holen, Batch einreichen ──
+  # ── Sonntag 06:00: Universe bauen, Filings holen, Batch einreichen ──
   batch-submit:
     name: Submit Batch (Sunday)
     runs-on: ubuntu-latest
@@ -44,18 +47,35 @@ jobs:
         run: |
           mkdir -p data logs
           python src/main.py --mode batch_submit
+          # Extract batch_id from DB and write to file for next job
+          python3 -c "
+          import sqlite3, sys
+          try:
+            conn = sqlite3.connect('data/thiel_detector.db')
+            row = conn.execute(\"SELECT batch_id FROM batch_runs WHERE status='submitted' ORDER BY submitted_at DESC LIMIT 1\").fetchone()
+            if row:
+              print(row[0])
+              open('data/batch_id.txt','w').write(row[0])
+            else:
+              print('NO_BATCH', file=sys.stderr)
+          except Exception as e:
+            print(f'ERROR: {e}', file=sys.stderr)
+          "
+          cat data/batch_id.txt
 
-      - name: Upload DB snapshot
+      - name: Upload DB + batch_id
         uses: actions/upload-artifact@v4
         with:
           name: thiel-db-latest
-          path: data/thiel_detector.db
+          path: |
+            data/thiel_detector.db
+            data/batch_id.txt
           retention-days: 7
           overwrite: true
 
-  # ── Montag 07:00: Batch-Ergebnisse abholen, Alerts senden ──
+  # ── Sonntag 12:00: Ergebnisse abholen, Alerts senden ──
   batch-collect:
-    name: Collect Results (Monday)
+    name: Collect Results (Sunday)
     runs-on: ubuntu-latest
     if: |
       github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'batch_collect' ||
@@ -71,12 +91,12 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Download latest DB snapshot
+      - name: Download DB + batch_id artifact
         uses: actions/download-artifact@v4
         with:
           name: thiel-db-latest
           path: data/
-        continue-on-error: true  # first run has no artifact yet
+        continue-on-error: true
 
       - name: Collect batch results
         env:
@@ -85,15 +105,28 @@ jobs:
           EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
           EMAIL_RECIPIENT: ${{ secrets.EMAIL_RECIPIENT }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MANUAL_BATCH_ID: ${{ github.event.inputs.batch_id }}
         run: |
           mkdir -p data logs
+          # Use manual batch_id if provided, else read from file
+          if [ -n "$MANUAL_BATCH_ID" ]; then
+            echo "$MANUAL_BATCH_ID" > data/batch_id.txt
+            echo "Using manual batch_id: $MANUAL_BATCH_ID"
+          elif [ -f data/batch_id.txt ]; then
+            echo "Using batch_id from artifact: $(cat data/batch_id.txt)"
+          else
+            echo "ERROR: No batch_id available"
+            exit 1
+          fi
           python src/main.py --mode batch_collect
 
       - name: Upload updated DB
         uses: actions/upload-artifact@v4
         with:
           name: thiel-db-latest
-          path: data/thiel_detector.db
+          path: |
+            data/thiel_detector.db
+            data/batch_id.txt
           retention-days: 30
           overwrite: true
 

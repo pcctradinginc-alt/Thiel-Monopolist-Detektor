@@ -411,8 +411,15 @@ def main():
             logger.error("Batch submission failed")
 
     elif args.mode == "batch_collect":
-        # Retrieve results from last submitted batch
-        batch_id = getattr(args, "batch_id", None) or get_pending_batch(conn)
+        # Retrieve results: priority = CLI arg > batch_id.txt file > DB lookup
+        batch_id = getattr(args, "batch_id", None)
+        if not batch_id:
+            batch_id_file = ROOT / "data" / "batch_id.txt"
+            if batch_id_file.exists():
+                batch_id = batch_id_file.read_text().strip()
+                logger.info(f"Using batch_id from file: {batch_id}")
+        if not batch_id:
+            batch_id = get_pending_batch(conn)
         if not batch_id:
             logger.error("No pending batch found. Run batch_submit first.")
         else:
