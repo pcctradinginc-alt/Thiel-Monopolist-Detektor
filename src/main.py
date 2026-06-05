@@ -28,7 +28,9 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from db.database import get_connection, seed_cohorts
 from universe.universe_builder import build_universe
+from universe.eu_universe_builder import build_eu_universe
 from data.filing_collector import fetch_filing_data, compute_lane_scores as compute_lanes
+from data.eu_prefilter import batch_prefilter
 from analysis.llm_analyzer import analyze_company
 from alerts.alert_manager import process_alerts
 from feedback.feedback_processor import process_feedback
@@ -226,8 +228,23 @@ def run_screening(config: dict, conn, run_id: str, dry_run: bool = False,
     min_lane_score = screening_cfg.get("min_score_for_llm_call", 20)
 
     # Build/refresh universe
-    logger.info("Building universe...")
+    logger.info("Building US universe...")
     universe = build_universe(config, conn)
+
+    # EU universe: build → yfinance pre-filter → append survivors
+    if config.get("eu_universe", {}).get("enabled", False):
+        logger.info("Building EU universe...")
+        eu_candidates = build_eu_universe(config, conn)
+        if eu_candidates:
+            eu_passed, eu_rejected = batch_prefilter(
+                eu_candidates,
+                exchange_suffix="",  # suffix already in ticker
+            )
+            logger.info(
+                f"EU pre-filter: {len(eu_passed)} passed, "
+                f"{len(eu_rejected)} rejected — {len(eu_rejected)} Eulerpool calls saved"
+            )
+            universe = universe + eu_passed
 
     if not universe:
         logger.error("Empty universe — aborting")

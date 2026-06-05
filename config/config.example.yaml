@@ -103,6 +103,22 @@ alerts:
   create_github_issues: true
   github_repo: "pcctradinginc-alt/Thiel-Monopolist-Detektor"
 
+eu_universe:
+  enabled: false                  # Auf true setzen wenn Eulerpool API Key gesetzt
+  exchanges:
+    - xetra                       # XETRA (DE): DAX/MDAX/SDAX/TecDAX + weitere
+    - six                         # SIX Swiss Exchange (CH)
+    - aex                         # Euronext Amsterdam (NL)
+    - vienna                      # Wiener Börse (AT)
+  min_market_cap_m: 50            # Small Caps einschließen (€50M+)
+  eulerpool_api_key_env: "EULERPOOL_API_KEY"
+  # Pre-Filter Schwellen (yfinance, kostenlos)
+  prefilter:
+    min_gross_margin_pct: 40
+    min_operating_margin_pct: 5
+    min_revenue_growth_pct: 3
+    marketplace_om_exception_pct: 12  # Plattformen mit OM > 12% dürfen durch
+
 persistence:
   # MVP: SQLite lokal + als Release Asset
   # Prod: Turso (URL + Token via GitHub Secrets)
