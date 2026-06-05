@@ -121,11 +121,17 @@ def main():
         else:
             print(f"WARNING setting {name}: {resp.get('errors')}")
 
-    # Step 4: Enable workers.dev subdomain
-    cf_request("POST",
+    # Step 4: Enable workers.dev subdomain (try both PUT and POST)
+    r1 = cf_request("PUT",
         f"/accounts/{account_id}/workers/scripts/thiel-feedback/subdomain",
         data={"enabled": True}
     )
+    print(f"Subdomain enable (PUT): {r1.get('success')} {r1.get('errors','')}")
+    r2 = cf_request("POST",
+        f"/accounts/{account_id}/workers/scripts/thiel-feedback/subdomain",
+        data={"enabled": True}
+    )
+    print(f"Subdomain enable (POST): {r2.get('success')} {r2.get('errors','')}")
 
     # Step 5: Get subdomain
     resp = cf_request("GET", f"/accounts/{account_id}/workers/subdomain")
