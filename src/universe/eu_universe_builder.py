@@ -732,9 +732,10 @@ def build_eu_universe(config: dict, conn) -> list[dict]:
     else:
         logger.info("FMP_API_KEY not set — using seeds only for EU universe")
 
-    # ── EU IPOs: add recent IPOs as high-priority candidates ─────────────────
+    # ── EU IPOs: upcoming + recent via all sources ────────────────────────────
     ipo_months = eu_config.get("ipo_months_back", 18)
-    ipo_candidates = fetch_eu_ipos(months_back=ipo_months)
+    from universe.ipo_monitor import fetch_all_upcoming_ipos
+    ipo_candidates = fetch_all_upcoming_ipos(months_back=ipo_months)
     ipo_added = 0
     for ipo in ipo_candidates:
         full_ticker = ipo["ticker"]
