@@ -84,10 +84,10 @@ Return ONLY valid JSON matching this exact schema:
     "ticker": "<ticker>",
     "evaluation_summary": "2 sentence honest summary",
     "criteria": {
-      "proprietary_technology": {"evidence": ["max 2"], "counter_evidence": ["max 2"], "score": 0},
-      "network_effects":        {"evidence": ["max 2"], "counter_evidence": ["max 2"], "score": 0},
-      "economies_of_scale":     {"evidence": ["max 2"], "counter_evidence": ["max 2"], "score": 0},
-      "branding":               {"evidence": ["max 1"], "counter_evidence": ["max 1"], "score": 0}
+      "proprietary_technology": {"evidence": ["1 item max"], "counter_evidence": ["1 item max"], "score": 0},
+      "network_effects":        {"evidence": ["1 item max"], "counter_evidence": ["1 item max"], "score": 0},
+      "economies_of_scale":     {"evidence": ["1 item max"], "counter_evidence": ["1 item max"], "score": 0},
+      "branding":               {"evidence": ["1 item max"], "counter_evidence": ["1 item max"], "score": 0}
     },
     "scores": {
       "monopoly_score": 0,
@@ -144,7 +144,7 @@ def build_batch_request(ticker: str, filing_data: dict, model: str) -> dict:
         "custom_id": ticker,
         "params": {
             "model": model,
-            "max_tokens": 1800,
+            "max_tokens": 3000,
             "messages": [{
                 "role": "user",
                 "content": [
