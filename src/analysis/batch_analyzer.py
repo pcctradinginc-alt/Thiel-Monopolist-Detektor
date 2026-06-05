@@ -270,9 +270,24 @@ def collect_batch(batch_id: str, conn, config: dict, dry_run: bool = False) -> d
             try:
                 parsed = json.loads(raw)
             except json.JSONDecodeError as e:
-                logger.warning(f"{ticker}: JSON parse failed — {e}")
-                summary["failed"] += 1
-                continue
+                # Attempt to salvage truncated JSON by finding last complete object
+                logger.warning(f"{ticker}: JSON parse failed ({e}) — attempting salvage")
+                try:
+                    # Find last valid closing brace
+                    for end in range(len(raw) - 1, 0, -1):
+                        if raw[end] == '}':
+                            try:
+                                parsed = json.loads(raw[:end + 1])
+                                logger.info(f"{ticker}: JSON salvaged at char {end}")
+                                break
+                            except json.JSONDecodeError:
+                                continue
+                    else:
+                        raise ValueError("Could not salvage JSON")
+                except Exception:
+                    logger.warning(f"{ticker}: JSON unrecoverable — skipping")
+                    summary["failed"] += 1
+                    continue
 
             # Reconstruct the analysis dict (same shape as analyze_company output)
             assessment = parsed.get("assessment", {})
@@ -352,9 +367,18 @@ def _save_batch_result(conn, ticker: str, analysis: dict, alert_outcome: dict):
     from main import save_evaluation, update_company_status
     now = datetime.now(timezone.utc).isoformat()
     run_id = conn.execute(
-        "SELECT run_id FROM batch_runs WHERE status='collected' ORDER BY collected_at DESC LIMIT 1"
+        "SELECT run_id FROM batch_runs ORDER BY submitted_at DESC LIMIT 1"
     ).fetchone()
     run_id = run_id["run_id"] if run_id else "batch"
+
+    # Ensure ticker exists in companies table (FK requirement)
+    existing = conn.execute("SELECT ticker FROM companies WHERE ticker = ?", (ticker,)).fetchone()
+    if not existing:
+        conn.execute("""
+            INSERT INTO companies (ticker, name, cohort_id, first_seen_in_universe, is_active)
+            VALUES (?, ?, 'batch', ?, 1)
+        """, (ticker, ticker, now))
+        conn.commit()
 
     save_evaluation(conn, ticker, run_id, {}, {}, analysis, alert_outcome)
     update_company_status(conn, ticker, analysis, alert_outcome)
