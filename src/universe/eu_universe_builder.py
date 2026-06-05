@@ -94,6 +94,42 @@ XETRA_SEEDS = [
     ("VIE", "Vienna International Airport"), ("WDP", "Warehouses De Pauw"),
     ("XTP", "Xentis AG"), ("YSN", "Ypsomed Holding"),
 
+    # ── Hidden Champions — nicht in Indices aber hohe Thiel-Relevanz ──
+    # B2B-Software mit hohen Switching Costs, Nischenmarktführer, Family-owned
+    ("AOF", "Atoss Software AG"),          # HR-Software DACH, ~80% GM, starker Lock-in
+    ("HYQ", "Hypoport SE"),                # Kredit-Plattform für dt. Banken
+    ("PSI", "PSI Software SE"),            # Energie/Industrie ERP, hohe Switching Costs
+    ("ADN1", "Adesso SE"),                 # IT-Consulting Branchen-Spezialist
+    ("GFT", "GFT Technologies SE"),        # Fintech-IT, tief in Banken integriert
+    ("NA9", "Nagarro SE"),                 # Software Engineering Platform
+    ("RAA", "RATIONAL AG"),               # Profi-Küchentech, 50%+ Weltmarktanteil
+    ("KTN", "Kontron AG"),                # Embedded Computing B2B
+    ("NFON", "NFON AG"),                  # Cloud-Telefonie KMU
+    ("CLIQ", "CLIQ Digital AG"),          # Digital-Abo Nischenplattform
+    ("DBO", "Drägerwerk AG"),             # Medizin/Sicherheitstechnik, Mission-Critical
+    ("SBS", "Stratec SE"),                # Laborautomation OEM, Sole-Source-Lieferant
+    ("SMH", "Schmolz+Bickenbach AG"),     # Spezialstahl, Nischenmarktführer
+    ("ECK", "Eckert & Ziegler AG"),       # Radioaktive Isotope, regulatorischer Moat
+    ("MBB", "MBB SE"),                    # Beteiligungsges. Hidden Champions
+    ("ZEG", "Zeal Network SE"),           # Lotterie-Plattform DE, Monopol
+    ("SBSPA", "Sto SE"),                  # Fassadensysteme, Marktführer DE
+    ("PSAN", "ProSiebenSat.1 Media SE"),  # Medien-Plattform
+    ("FNTN", "freenet AG"),               # Mobilfunk-Plattform, Kundenbindung
+    ("PSH", "PSI Software SE"),           # (doppelt, ok)
+    ("PGN", "Paragon GmbH & Co"),         # Automotive Elektronik OEM
+    ("HOT", "Hochtief AG"),               # Bau-Spezialist
+    ("DIC", "DIC Asset AG"),              # Gewerbeimmobilien-Plattform
+    ("PAYX", "Paychex (XETRA)"),          # Payroll-SaaS
+    ("HDD2", "Hella GmbH"),               # Automotive-Tech, OEM-Integration
+    ("KGX", "Kion Group AG"),             # Intralogistik-Software + Hardware
+    ("DBAN", "Deutsche Beteiligungs AG"), # PE für dt. Mittelstand
+    ("FPH", "flatexDEGIRO AG"),          # Broker-Plattform, Lock-in durch Depot
+    ("IOS", "IONOS Group SE"),            # Cloud-Hosting KMU, Switching-Cost-Modell
+    ("RENK", "Renk Group AG"),            # Getriebespezialist Verteidigung/Marine
+    ("MELE", "Medios AG"),               # Pharma-Spezialkompensation, reguliert
+    ("SKB", "Skan Group AG"),            # Pharma-Isolatoren, Marktführer
+    ("YPSN2", "Ypsomed Holding AG"),     # Drug-Delivery Systeme, OEM-Lock-in
+
     # SDAX + smaller interesting names
     ("ACX", "Accentro Real Estate AG"), ("ADJ", "adjoe GmbH"),
     ("AOF2", "Atoss Software pref"), ("CANE", "Canandaigua National"),

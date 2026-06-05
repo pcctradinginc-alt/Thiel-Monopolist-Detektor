@@ -17,6 +17,41 @@ jobs:
           EULERPOOL_API_KEY: ${{ secrets.EULERPOOL_API_KEY }}
         run: |
           python3 - << 'PYEOF'
+          # First: try to find OpenAPI spec or docs
+          import requests, os, json
+          token = os.environ.get("EULERPOOL_API_KEY", "")
+          h = {"Authorization": f"Bearer {token}"}
+          base = "https://api.eulerpool.com"
+
+          for path in ["/openapi.json", "/swagger.json", "/api-docs", "/docs",
+                       "/v1", "/v2", "/v1/docs", "/health"]:
+              r = requests.get(base + path, headers=h, timeout=8)
+              if r.status_code == 200:
+                  print(f"FOUND {path}: {r.text[:300]}")
+
+          # Try ISIN-based endpoints for SAP (DE0007164600)
+          isin = "DE0007164600"
+          for ep in [
+              f"/{isin}", f"/v1/{isin}", f"/v2/{isin}",
+              f"/v1/company/{isin}/income-statement",
+              f"/v1/company/{isin}/balance-sheet",
+              f"/v1/company/{isin}/cash-flow",
+              f"/v1/company/{isin}/ratios",
+              f"/v1/company/{isin}/profile",
+              f"/v1/stock/{isin}/history",
+              f"/v1/stocks/{isin}",
+              f"/v1/equity-screener",
+              f"/v1/equity-screener?country=DE&limit=10",
+              f"/v1/screener/equity?country=DE&limit=10",
+          ]:
+              r = requests.get(base + ep, headers=h, timeout=8)
+              if r.status_code == 200:
+                  print(f"\n✅ {ep}")
+                  print(r.text[:400])
+              elif r.status_code not in (404, 403, 405):
+                  print(f"  {r.status_code} {ep}: {r.text[:150]}")
+          exit(0)
+
           import requests, os, json
 
           token = os.environ.get("EULERPOOL_API_KEY", "")
