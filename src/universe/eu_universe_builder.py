@@ -624,7 +624,23 @@ def build_eu_universe(config: dict, conn) -> list[dict]:
                 "source": "seed",
             })
 
-    logger.info(f"EU universe (established): {len(companies)} candidates across {len(enabled_exchanges)} exchanges")
+    logger.info(f"EU universe (seeds+live): {len(companies)} candidates across {len(enabled_exchanges)} exchanges")
+
+    # ── FMP: bulk EU stock list (1 API call, ~1000+ EU tickers) ──────────────
+    import os
+    fmp_key = os.environ.get("FMP_API_KEY", "")
+    if fmp_key:
+        from universe.fmp_universe import fetch_fmp_eu_universe
+        fmp_companies = fetch_fmp_eu_universe(fmp_key)
+        fmp_added = 0
+        for company in fmp_companies:
+            if company["ticker"] not in seen_tickers:
+                seen_tickers.add(company["ticker"])
+                companies.append(company)
+                fmp_added += 1
+        logger.info(f"FMP added {fmp_added} new EU tickers (total now: {len(companies)})")
+    else:
+        logger.info("FMP_API_KEY not set — using seeds only for EU universe")
 
     # ── EU IPOs: add recent IPOs as high-priority candidates ─────────────────
     ipo_months = eu_config.get("ipo_months_back", 18)
