@@ -63,13 +63,44 @@ def main():
     script = Path(__file__).parent.joinpath("worker.js").read_text()
     metadata = json.dumps({"main_module": "worker.js"})
 
-    resp = cf_request("PUT",
-        f"/accounts/{account_id}/workers/scripts/thiel-feedback",
-        form_data={
-            "metadata": (metadata, "application/json"),
-            "worker.js": (script, "application/javascript+module"),
+    # Build multipart body manually with correct filename in Content-Disposition
+    boundary = "----CloudflareBoundary7MA4YWxkTrZu0gW"
+    crlf = b"\r\n"
+
+    def part(name, content, ctype, filename=None):
+        disp = f'form-data; name="{name}"'
+        if filename:
+            disp += f'; filename="{filename}"'
+        lines = [
+            f"--{boundary}".encode(),
+            f"Content-Disposition: {disp}".encode(),
+            f"Content-Type: {ctype}".encode(),
+            b"",
+            content if isinstance(content, bytes) else content.encode("utf-8"),
+        ]
+        return crlf.join(lines)
+
+    body = crlf.join([
+        part("metadata", metadata, "application/json"),
+        part("worker.js", script, "application/javascript+module", filename="worker.js"),
+        f"--{boundary}--".encode(),
+    ])
+
+    token = os.environ["CF_TOKEN"]
+    url = f"https://api.cloudflare.com/client/v4/accounts/{account_id}/workers/scripts/thiel-feedback"
+    req = urllib.request.Request(
+        url, data=body, method="PUT",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": f"multipart/form-data; boundary={boundary}",
         }
     )
+    try:
+        with urllib.request.urlopen(req) as r:
+            resp = json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        resp = json.loads(e.read())
+
     if resp.get("success"):
         print("Worker script uploaded OK")
     else:
