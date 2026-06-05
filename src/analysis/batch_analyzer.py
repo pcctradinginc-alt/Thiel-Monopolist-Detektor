@@ -144,7 +144,7 @@ def build_batch_request(ticker: str, filing_data: dict, model: str) -> dict:
         "custom_id": ticker,
         "params": {
             "model": model,
-            "max_tokens": 3000,
+            "max_tokens": 4096,
             "messages": [{
                 "role": "user",
                 "content": [
