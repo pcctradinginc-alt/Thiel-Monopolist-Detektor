@@ -2,8 +2,7 @@ name: Screening — Wöchentlich (Batch API)
 
 on:
   schedule:
-    - cron: "0 6 * * 0"    # Sonntag 06:00 UTC → batch_submit
-    - cron: "0 12 * * 0"   # Sonntag 12:00 UTC → batch_collect + alerts (6h Puffer)
+    - cron: "0 6 * * 0"    # Sonntag 06:00 UTC → einziger Run: submit → 6h warten → collect
   workflow_dispatch:
     inputs:
       mode:
@@ -27,7 +26,7 @@ jobs:
     runs-on: ubuntu-latest
     if: |
       github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'batch_submit' ||
-      github.event_name == 'schedule' && startsWith(github.event.schedule, '0 6')
+      github.event_name == 'schedule'
     steps:
       - uses: actions/checkout@v4
 
@@ -74,13 +73,14 @@ jobs:
           retention-days: 7
           overwrite: true
 
-  # ── Sonntag 12:00: Ergebnisse abholen, Alerts senden ──
+  # ── ~6h warten, dann Ergebnisse abholen ──
   batch-collect:
     name: Collect Results (Sunday)
     runs-on: ubuntu-latest
+    needs: batch-submit
     if: |
       github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'batch_collect' ||
-      github.event_name == 'schedule' && startsWith(github.event.schedule, '0 12')
+      github.event_name == 'schedule'
     steps:
       - uses: actions/checkout@v4
 
@@ -92,12 +92,17 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+      - name: Wait 6 hours for Anthropic batch to complete
+        if: github.event_name == 'schedule'
+        run: |
+          echo "Waiting 6 hours for batch processing..."
+          sleep 21600
+
       - name: Download DB + batch_id artifact
         uses: actions/download-artifact@v4
         with:
           name: thiel-db-latest
           path: data/
-        continue-on-error: true
 
       - name: Collect batch results
         env:
@@ -114,15 +119,12 @@ jobs:
           MANUAL_BATCH_ID: ${{ github.event.inputs.batch_id }}
         run: |
           mkdir -p data logs
-          # Use manual batch_id if provided, else read from file
+          # Use manual batch_id if provided, else read from file (guaranteed by needs: batch-submit)
           if [ -n "$MANUAL_BATCH_ID" ]; then
             echo "$MANUAL_BATCH_ID" > data/batch_id.txt
             echo "Using manual batch_id: $MANUAL_BATCH_ID"
-          elif [ -f data/batch_id.txt ]; then
-            echo "Using batch_id from artifact: $(cat data/batch_id.txt)"
           else
-            echo "ERROR: No batch_id available"
-            exit 1
+            echo "Using batch_id from artifact: $(cat data/batch_id.txt)"
           fi
           python src/main.py --mode batch_collect
 
