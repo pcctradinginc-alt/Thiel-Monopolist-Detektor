@@ -617,6 +617,8 @@ def main():
                 filing_data = fetch_filing_data(ticker, cik=company.get("cik"))
             lane_data = compute_lanes(filing_data, config)
             if lane_data.get("total_lane_score", 0) >= min_lane_score or ticker in manual_watchlist:
+                # Filing-Snapshot persistieren bevor Batch submitted wird
+                save_filing_snapshot(conn, ticker, filing_data, lane_data)
                 companies_with_filings.append((ticker, filing_data))
 
         batch_id = submit_batch(companies_with_filings, config, conn, run_id)

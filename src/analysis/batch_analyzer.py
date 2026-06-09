@@ -415,9 +415,10 @@ def collect_batch(batch_id: str, conn, config: dict, dry_run: bool = False) -> d
 
             # Schema-Validierung — stille Fehler verhindern
             validation_errors = validate_llm_output(parsed, ticker)
-            if len(validation_errors) > 2:
-                # Zu viele Fehler → Ergebnis unbrauchbar
-                logger.warning(f"{ticker}: {len(validation_errors)} validation errors — skipping")
+            # Kritisch: monopoly_score fehlt → Ergebnis unbrauchbar
+            is_critical = any("monopoly_score" in e for e in validation_errors)
+            if is_critical or len(validation_errors) > 3:
+                logger.warning(f"{ticker}: unrecoverable validation errors {validation_errors} — skipping")
                 summary["failed"] += 1
                 continue
 
