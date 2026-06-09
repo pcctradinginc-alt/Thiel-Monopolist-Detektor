@@ -38,6 +38,22 @@ universe:
       min_market_cap_m: 300
       alerting_enabled: false  # Baseline läuft noch
 
+eu_universe:
+  enabled: true
+  exchanges:
+    - xetra       # Deutschland (.DE)
+    - six         # Schweiz (.SW)
+    - euronext_nl # Niederlande (.AS)
+    - euronext_fr # Frankreich (.PA)
+    - nasdaq_se   # Schweden (.ST)
+    - nasdaq_fi   # Finnland (.HE)
+    - nasdaq_dk   # Dänemark (.CO)
+    - oslo        # Norwegen (.OL)
+    - euronext_be # Belgien (.BR)
+    - wien        # Österreich (.VI)
+  min_market_cap_m: 200
+  alerting_enabled: true
+
 screening:
   # LLM-Konfiguration
   model_screening: "claude-haiku-4-5-20251001"
