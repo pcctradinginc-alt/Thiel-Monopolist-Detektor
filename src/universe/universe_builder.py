@@ -191,14 +191,17 @@ def build_universe(config: dict, conn) -> list[dict]:
     ]
     logger.info(f"After hard filter: {len(valid_companies)} companies")
 
-    # Step 3: Match to active cohorts
+    # Step 3a: Auto-promote high-scoring companies → high_conviction cohort
+    auto_promoted = _get_auto_promoted(conn, config)
+    if auto_promoted:
+        logger.info(f"Auto-promoted to high_conviction: {len(auto_promoted)} Ticker "
+                    f"({', '.join(list(auto_promoted)[:10])}{'...' if len(auto_promoted)>10 else ''})")
+
+    # Step 3b: Match to active cohorts
     active_tickers = []
     for cohort in cohorts:
-        if not cohort.get("alerting_enabled") and cohort.get("baseline_runs_completed", 0) < 2:
-            # Include in baseline, but mark accordingly
-            pass
-
-        cohort_tickers = _filter_cohort(valid_companies, cohort)
+        cohort_tickers = _filter_cohort(valid_companies, cohort,
+                                        auto_promoted=auto_promoted)
         for t in cohort_tickers:
             t["cohort_id"] = cohort["id"]
         active_tickers.extend(cohort_tickers)
@@ -238,7 +241,41 @@ def build_universe(config: dict, conn) -> list[dict]:
     return unique_tickers
 
 
-def _filter_cohort(companies: list[dict], cohort: dict) -> list[dict]:
+def _get_auto_promoted(conn, config: dict) -> set:
+    """
+    Gibt Ticker zurück die automatisch in high_conviction hochgestuft werden.
+    Kriterium: monopoly_score >= X in mind. N aufeinanderfolgenden Runs.
+    Wird aus der DB gelesen — kein manueller Eingriff nötig.
+    """
+    hc_cohort = next(
+        (c for c in config.get("universe", {}).get("cohorts", [])
+         if c.get("id") == "high_conviction"),
+        None
+    )
+    if not hc_cohort or not hc_cohort.get("auto_promote"):
+        return set()
+
+    ap = hc_cohort["auto_promote"]
+    min_score = ap.get("min_monopoly_score", 65)
+    min_runs  = ap.get("min_consecutive_runs", 2)
+
+    try:
+        # Zähle wie oft jeder Ticker score >= min_score erzielt hat
+        rows = conn.execute("""
+            SELECT ticker, COUNT(*) as high_score_runs
+            FROM evaluations
+            WHERE monopoly_score >= ?
+            GROUP BY ticker
+            HAVING high_score_runs >= ?
+        """, (min_score, min_runs)).fetchall()
+        return {row["ticker"] for row in rows}
+    except Exception as e:
+        logger.debug(f"Auto-promote query failed: {e}")
+        return set()
+
+
+def _filter_cohort(companies: list[dict], cohort: dict,
+                   auto_promoted: set = None) -> list[dict]:
     """
     Filter companies for a cohort. Drei Modi:
 
@@ -246,19 +283,19 @@ def _filter_cohort(companies: list[dict], cohort: dict) -> list[dict]:
     2. broad_watch / sic_codes=[]: alle Unternehmen (nur Market-Cap-Filter)
     3. normal: SIC-basiert (nur wenn SIC-Daten vorhanden)
     """
-    cohort_id = cohort.get("id", "")
-    sic_codes = set(str(s) for s in cohort.get("sic_codes", []))
-    min_cap   = cohort.get("min_market_cap_m", 0)
-    tickers   = set(t.upper() for t in cohort.get("tickers", []))
+    cohort_id     = cohort.get("id", "")
+    sic_codes     = set(str(s) for s in cohort.get("sic_codes", []))
+    min_cap       = cohort.get("min_market_cap_m", 0)
+    auto_promoted = auto_promoted or set()
 
     result = []
 
     for company in companies:
         ticker = company.get("ticker", "").upper()
 
-        # Modus 1: high_conviction — nur explizite Ticker-Liste
+        # Modus 1: high_conviction — nur auto-promoted Ticker (DB-basiert)
         if cohort_id == "high_conviction":
-            if tickers and ticker not in tickers:
+            if ticker not in auto_promoted:
                 continue
             result.append(company)
             continue

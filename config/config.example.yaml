@@ -27,29 +27,20 @@ universe:
   # Trigger-Bypass: neues Filing oder Score-Sprung → immer Tier 1
 
   cohorts:
-    # ── SCHICHT 1: High Conviction (manuell, keine SIC-Einschränkung) ────────
+    # ── SCHICHT 1: Auto-promoted High Conviction ─────────────────────────────
+    # Wird NICHT manuell gepflegt — das System befüllt diese Schicht selbst.
+    # Kriterium: monopoly_score >= 65 in mind. 2 aufeinanderfolgenden Runs
+    # → Ticker wird automatisch in diese Cohort hochgestuft (via DB)
+    # → Wöchentliche Analyse, höchste Priorität
     - id: high_conviction
-      name: "High Conviction Watchlist"
-      sic_codes: []               # bewusst leer = keine SIC-Einschränkung
-      min_market_cap_m: 300
-      rotation_tier: core         # wöchentlich — höchste Priorität
+      name: "Auto-Promoted High Conviction"
+      sic_codes: []               # keine SIC-Einschränkung (Score entscheidet)
+      min_market_cap_m: 0         # kein Cap-Filter (Score hat Priorität)
+      rotation_tier: core
       alerting_enabled: true
-      tickers:                    # Manuell gepflegte High-Conviction-Liste
-        # Klassische Thiel-Monopolisten außerhalb Software-SIC
-        - "TDG"    # TransDigm — Aerospace-Teile-Monopolist, 100%+ Pricing Power
-        - "MCO"    # Moody's — Rating-Duopol, regulatorischer Moat
-        - "SPGI"   # S&P Global — Daten-Monopolist, Pflichtkonsum
-        - "MSCI"   # MSCI — Index-Monopol, jede Fondsgesellschaft braucht es
-        - "POOL"   # Pool Corp — Vertriebsmonopolist Swimmingpool-Teile
-        - "ENTG"   # Entegris — Semiconductor-Materialien Sole-Source
-        - "FAST"   # Fastenal — Industrial Vending Lock-in
-        - "ODFL"   # Old Dominion Freight — LTL Netzwerkeffekte
-        - "WSO"    # Watsco — HVAC-Vertriebsplattform
-        - "CSGP"   # CoStar — Gewerbeimmobilien-Datenmonopol
-        - "VRSK"   # Verisk Analytics — Versicherungsdaten-Monopol
-        - "ICE"    # Intercontinental Exchange — bereits Alert ausgelöst
-        - "FICO"   # Fair Isaac — bereits Alert ausgelöst
-        - "ISRG"   # Intuitive Surgical — bereits Alert ausgelöst
+      auto_promote:               # Kriterien für automatische Hochstufung
+        min_monopoly_score: 65
+        min_consecutive_runs: 2   # mind. 2 Runs mit Score >= 65
 
     # ── SCHICHT 2: Moat-Prone Sektoren (SIC-basiert, alle 2 Wochen) ─────────
     - id: moat_prone_sectors
