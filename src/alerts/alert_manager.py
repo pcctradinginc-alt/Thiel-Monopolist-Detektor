@@ -70,18 +70,22 @@ def should_send_alert(
     if data_quality_score < min_data_quality:
         return False, f"data_quality_score {data_quality_score} < threshold {min_data_quality}"
 
-    # Cooldown check
+    # Cooldown check — Delta überschreibt Cooldown wenn Score signifikant gestiegen
     if previous_status:
         last_alert_date = previous_status.get("last_alert_date")
         if last_alert_date:
             last_alert = datetime.fromisoformat(last_alert_date)
             cooldown_end = last_alert + timedelta(days=cooldown_days)
             if datetime.now(timezone.utc) < cooldown_end:
-                # Only override cooldown if MOAT_RISK_DETECTED or big score jump
-                if alert_type != "MOAT_RISK_DETECTED":
-                    prev_monopoly = previous_status.get("monopoly_score", 0)
-                    if monopoly_score - prev_monopoly < min_delta:
-                        return False, f"Within cooldown period and score delta < {min_delta}"
+                prev_monopoly = previous_status.get("monopoly_score", 0)
+                score_delta = monopoly_score - prev_monopoly
+                # MOAT_RISK_DETECTED oder signifikanter Score-Sprung → immer alertieren
+                if alert_type == "MOAT_RISK_DETECTED":
+                    pass  # immer durchlassen
+                elif score_delta >= min_delta:
+                    pass  # großer Sprung überschreibt Cooldown
+                else:
+                    return False, f"Within cooldown period and score delta {score_delta} < {min_delta}"
 
     return True, f"All thresholds met — alert type: {alert_type}"
 

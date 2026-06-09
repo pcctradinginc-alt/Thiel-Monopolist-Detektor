@@ -58,7 +58,7 @@ screening:
   # LLM-Konfiguration
   model_screening: "claude-haiku-4-5-20251001"
   model_final: "claude-sonnet-4-6"
-  max_calls_per_run: 500          # US ~150 + EU ~350 (volle Abdeckung in 4 Wochen)
+  max_calls_per_run: 750          # US + EU: ~10.700 Unternehmen / 750 = ~14 Wochen Rotation
   max_input_tokens_per_call: 12000
   rate_limit_rpm: 40
   rate_limit_tpm: 400000
@@ -110,8 +110,8 @@ screening:
 
 alerts:
   # Alert-Hysterese
-  min_score_delta_for_alert: 8     # Mindestveränderung für erneuten Alert
-  alert_cooldown_days: 90          # Kein zweiter Alert innerhalb von X Tagen
+  min_score_delta_for_alert: 8     # Mindestveränderung überschreibt Cooldown
+  alert_cooldown_days: 21          # Kein zweiter Alert innerhalb von X Tagen (außer Delta >= 8)
 
   # Email-Konfiguration (via GitHub Secrets)
   email_subject_prefix: "[Thiel Detector]"
