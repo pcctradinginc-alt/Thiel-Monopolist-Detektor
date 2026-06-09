@@ -121,7 +121,7 @@ screening:
 
   # Scoring-Schwellen
   use_batch_api: true               # Anthropic Batch API (50% günstiger, Ergebnisse in <24h)
-  min_score_for_llm_call: 40        # Lane-Score ab dem LLM aufgerufen wird
+  min_score_for_llm_call: 55        # Lane-Score ab dem LLM aufgerufen wird (war 40 → ~25% weniger Calls)
   min_monopoly_score_alert: 65      # Minimum monopoly_score für Alert
   min_confidence_score_alert: 60    # Minimum confidence_score für Alert
   min_data_quality_score_alert: 55  # Minimum data_quality_score für Alert

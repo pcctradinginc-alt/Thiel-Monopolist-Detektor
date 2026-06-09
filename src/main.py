@@ -221,6 +221,27 @@ def save_evaluation(conn, ticker: str, run_id: str, filing_data: dict,
     conn.commit()
 
 
+def _get_cached_lane_score(conn, ticker: str, filing_date: str = None):
+    """
+    Gibt gecachten Lane-Score zurück wenn das Filing seit letzter Analyse
+    unverändert ist. Spart Lane-Score-Neuberechnung für stabile Unternehmen.
+    Gibt None zurück wenn kein Cache oder Filing neu.
+    """
+    if not filing_date:
+        return None
+    try:
+        row = conn.execute("""
+            SELECT lane_score, filing_date FROM evaluations
+            WHERE ticker = ? AND filing_date = ?
+            ORDER BY evaluated_at DESC LIMIT 1
+        """, (ticker, filing_date)).fetchone()
+        if row and row["lane_score"] is not None:
+            return row["lane_score"]
+    except Exception:
+        pass
+    return None
+
+
 def _prioritize_universe(universe: list[dict], conn, max_calls: int,
                           config: dict = None) -> list[dict]:
     """
@@ -425,16 +446,20 @@ def run_screening(config: dict, conn, run_id: str, dry_run: bool = False,
                 tracker.update(ticker)
                 continue
 
-            # Compute lane scores
-            lane_data = compute_lanes(filing_data, config)
-            lane_score = lane_data.get("total_lane_score", 0)
+            # Lane-Score: gecachten Wert verwenden wenn Filing unverändert
+            cached_lane = _get_cached_lane_score(conn, ticker,
+                                                  filing_data.get("filing_date"))
+            if cached_lane is not None:
+                lane_score = cached_lane
+                lane_data  = {"total_lane_score": lane_score, "lanes": {}, "_cached": True}
+                logger.debug(f"{ticker}: Lane score from cache: {lane_score}")
+            else:
+                lane_data  = compute_lanes(filing_data, config)
+                lane_score = lane_data.get("total_lane_score", 0)
 
-            # Skip if below minimum lane score (not excluded permanently — just this run)
-            if lane_score < min_lane_score and ticker not in (
-                config.get("screening", {}).get("lanes", {})
-                    .get("manual_watchlist", {}).get("tickers", [])
-            ):
-                logger.debug(f"{ticker}: Lane score {lane_score} < {min_lane_score} — skip LLM this run")
+            # Skip wenn unter Mindestscore (nicht permanent — nur dieser Run)
+            if lane_score < min_lane_score:
+                logger.debug(f"{ticker}: Lane score {lane_score} < {min_lane_score} — skip LLM")
                 tracker.update(ticker)
                 continue
 

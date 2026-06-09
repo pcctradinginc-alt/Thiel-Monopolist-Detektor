@@ -330,6 +330,15 @@ def collect_batch(batch_id: str, conn, config: dict, dry_run: bool = False) -> d
             filing_data = _get_cached_filing(conn, ticker)
             prev_status = _get_prev_status(conn, ticker)
 
+            # Sonnet-Validierung: nur bei neuem Alert + hohem Score
+            # Haiku hat Kandidaten vorselektiert — Sonnet bestätigt oder verwirft
+            monopoly_score = assessment.get("scores", {}).get("monopoly_score", 0)
+            alert_type = assessment.get("alert_type")
+            is_new_alert = alert_type and not prev_status.get("last_alert_date")
+
+            if is_new_alert and monopoly_score >= 65 and not dry_run:
+                analysis = _sonnet_validate(ticker, analysis, filing_data, config)
+
             alert_outcome = process_alerts(
                 ticker, analysis, filing_data, prev_status, config, conn, dry_run
             )
@@ -357,6 +366,95 @@ def collect_batch(batch_id: str, conn, config: dict, dry_run: bool = False) -> d
     except Exception as e:
         logger.error(f"Batch collection failed: {e}", exc_info=True)
         return {"error": str(e), "batch_id": batch_id}
+
+
+# ─── Sonnet Validation ───────────────────────────────────────────────────────
+
+def _sonnet_validate(ticker: str, haiku_analysis: dict, filing_data: dict,
+                     config: dict) -> dict:
+    """
+    Sonnet-Validierung für neue Alerts mit monopoly_score >= 65.
+
+    Haiku hat schnell vorselektiert — Sonnet prüft kritisch ob der Moat real ist.
+    Kosten: nur ~15-20 Sonnet-Calls/Woche (nur echte Alert-Kandidaten).
+
+    Gibt aktualisierte analysis zurück. Bei Widerspruch: Sonnet überschreibt Haiku.
+    Bei API-Fehler: Haiku-Ergebnis bleibt unverändert (fail-safe).
+    """
+    import anthropic
+
+    model = config.get("screening", {}).get("model_final", "claude-sonnet-4-6")
+    client = anthropic.Anthropic()
+
+    biz_desc    = filing_data.get("business_description", "")[:3000]
+    haiku_score = haiku_analysis.get("scores", {}).get("monopoly_score", 0)
+    haiku_type  = haiku_analysis.get("alert_type", "")
+    haiku_summary = ""
+    if haiku_analysis.get("assessment"):
+        haiku_summary = str(haiku_analysis["assessment"].get(
+            "evaluation_summary", ""))[:500]
+
+    prompt = f"""Du bist ein skeptischer Investment-Analyst der Thiel-artige Monopole sucht.
+Haiku hat folgendes Unternehmen als potenziellen Moat-Kandidaten identifiziert:
+
+Ticker: {ticker}
+Haiku Monopoly Score: {haiku_score}/100
+Haiku Alert Type: {haiku_type}
+Haiku Summary: {haiku_summary}
+
+Business Description:
+{biz_desc}
+
+Deine Aufgabe: Kritische Überprüfung. Ist dieser Moat WIRKLICH real und dauerhaft?
+
+Häufige Haiku-Fehler: überschätzte Netzwerkeffekte, verwechselt Marktführer mit Monopolist,
+ignorierten Wettbewerb, temporäre Kundenkonzentration als strukturellen Moat dargestellt.
+
+Antworte NUR mit JSON:
+{{"confirmed": true/false, "sonnet_monopoly_score": 0-100, "reason": "1 Satz", "alert_type": "{haiku_type} oder null"}}"""
+
+    try:
+        resp = client.messages.create(
+            model=model,
+            max_tokens=150,
+            messages=[{"role": "user", "content": prompt}]
+        )
+        raw = resp.content[0].text.strip()
+        # JSON extrahieren
+        start = raw.find("{")
+        end   = raw.rfind("}") + 1
+        parsed = json.loads(raw[start:end])
+
+        confirmed   = parsed.get("confirmed", True)
+        new_score   = parsed.get("sonnet_monopoly_score", haiku_score)
+        reason      = parsed.get("reason", "")
+        new_alert   = parsed.get("alert_type")
+
+        logger.info(
+            f"{ticker}: Sonnet validation — confirmed={confirmed}, "
+            f"score {haiku_score}→{new_score}, reason: {reason}"
+        )
+
+        # Sonnet überschreibt Haiku bei Widerspruch
+        updated = dict(haiku_analysis)
+        updated["sonnet_validated"] = True
+        updated["sonnet_confirmed"] = confirmed
+        if not confirmed:
+            updated["alert_type"] = None          # Alert zurückgezogen
+            updated["status"]     = "HAIKU_ONLY"
+        if new_score != haiku_score:
+            scores = dict(updated.get("scores", {}))
+            scores["monopoly_score"]          = new_score
+            scores["monopoly_score_haiku"]    = haiku_score  # Haiku-Wert erhalten
+            updated["scores"] = scores
+        if new_alert != haiku_type:
+            updated["alert_type"] = new_alert
+
+        return updated
+
+    except Exception as e:
+        logger.warning(f"{ticker}: Sonnet validation failed ({e}) — keeping Haiku result")
+        return haiku_analysis  # fail-safe: Haiku-Ergebnis bleibt
 
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────
