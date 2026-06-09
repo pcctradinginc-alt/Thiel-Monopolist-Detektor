@@ -221,82 +221,121 @@ def save_evaluation(conn, ticker: str, run_id: str, filing_data: dict,
     conn.commit()
 
 
-def _prioritize_universe(universe: list[dict], conn, max_calls: int) -> list[dict]:
+def _prioritize_universe(universe: list[dict], conn, max_calls: int,
+                          config: dict = None) -> list[dict]:
     """
-    Rotation-Priorität (4 Tiers):
-      Tier 1 — IPOs + nie analysiert: immer dabei, älteste zuerst
-      Tier 2 — Hot Leads (Score ≥ 55): wöchentlich wiederholen
-      Tier 3 — Rotation: alle anderen, älteste zuerst (FIFO)
-      Tier 4 — Überfällig (> 8 Wochen nicht gesehen): vorgezogen aus Tier 3
+    Zweistufiges Rotationssystem:
 
-    Philosophie: "nie analysiert" ist teurer als "lange nicht analysiert".
+    KERN-Tickers (rotation_tier: core) → alle 2 Wochen
+    ERWEITERT-Tickers (rotation_tier: extended) → alle 8 Wochen
+
+    Innerhalb jedes Tiers:
+      1. IPOs + nie analysiert (immer vorne)
+      2. Hot Leads (Score ≥ 55) — wöchentlich
+      3. Trigger: neues Filing seit letzter Analyse → hochpriorisiert
+      4. Fällige Core-Ticker (> 2 Wochen nicht gesehen)
+      5. Fällige Extended-Ticker (> 8 Wochen nicht gesehen)
+      6. Rest (noch nicht fällig)
+
+    Philosophie: breites Universe BEHALTEN, aber smarter rotieren.
     """
     from datetime import datetime, timezone, timedelta
 
+    # Cohort → rotation_tier Mapping aus Config
+    cohort_tier = {}
+    if config:
+        for cohort in config.get("universe", {}).get("cohorts", []):
+            cohort_tier[cohort["id"]] = cohort.get("rotation_tier", "extended")
+
     known = {}
     rows = conn.execute(
-        "SELECT ticker, last_evaluated, monopoly_score FROM company_status"
+        "SELECT ticker, last_evaluated, monopoly_score, last_filing_date "
+        "FROM company_status"
     ).fetchall()
     for row in rows:
         known[row["ticker"]] = {
             "last_evaluated": row["last_evaluated"],
             "monopoly_score": row["monopoly_score"] or 0,
+            "last_filing_date": row.get("last_filing_date"),
         }
 
     now = datetime.now(timezone.utc)
+    two_weeks_ago   = now - timedelta(days=14)
     eight_weeks_ago = now - timedelta(days=56)
 
-    tier1_new, tier1_ipo = [], []   # nie analysiert: neue zuerst, dann IPOs
-    tier2, tier3_overdue, tier3 = [], [], []
+    # Buckets
+    always      = []   # IPOs + nie analysiert
+    hot         = []   # Score ≥ 55
+    triggered   = []   # neues Filing seit letzter Analyse
+    core_due    = []   # Core, > 2 Wochen nicht gesehen
+    ext_due     = []   # Extended, > 8 Wochen nicht gesehen
+    not_due     = []   # noch nicht fällig — am Ende
 
     for company in universe:
-        ticker = company.get("ticker", "")
-        info = known.get(ticker, {})
-        last_eval_str = info.get("last_evaluated")
-        score = info.get("monopoly_score", 0)
-        is_ipo = company.get("cohort_id") in ("eu_ipo", "ipo_recent") or \
-                 company.get("source") == "ipo"
+        ticker    = company.get("ticker", "")
+        cohort_id = company.get("cohort_id", "")
+        tier      = cohort_tier.get(cohort_id, "extended")
+        info      = known.get(ticker, {})
+        last_eval_str    = info.get("last_evaluated")
+        last_filing_str  = info.get("last_filing_date")
+        score     = info.get("monopoly_score", 0)
+        is_ipo    = cohort_id in ("eu_ipo", "ipo_recent") or \
+                    company.get("source") == "ipo"
 
-        if not last_eval_str:
-            # Nie analysiert — IPOs separat für bessere Priorisierung
-            if is_ipo:
-                tier1_ipo.append(company)
-            else:
-                tier1_new.append(company)
-        elif score >= 55:
-            tier2.append(company)
-        else:
-            # Überfällig (> 8 Wochen) → vorgezogen
+        # Bucket 1: Immer dabei
+        if is_ipo or not last_eval_str:
+            always.append(company)
+            continue
+
+        # Bucket 2: Hot Leads
+        if score >= 55:
+            hot.append(company)
+            continue
+
+        # Zeitpunkt der letzten Analyse
+        try:
+            last_eval = datetime.fromisoformat(last_eval_str)
+        except Exception:
+            always.append(company)
+            continue
+
+        # Bucket 3: Trigger — neues Filing nach letzter Analyse
+        if last_filing_str:
             try:
-                last_eval = datetime.fromisoformat(last_eval_str)
-                if last_eval < eight_weeks_ago:
-                    tier3_overdue.append(company)
-                else:
-                    tier3.append(company)
+                last_filing = datetime.fromisoformat(last_filing_str)
+                if last_filing > last_eval:
+                    triggered.append(company)
+                    continue
             except Exception:
-                tier3.append(company)
+                pass
 
-    # Sortierung innerhalb Tiers
+        # Bucket 4+5: Fällig je nach Tier
+        if tier == "core" and last_eval < two_weeks_ago:
+            core_due.append(company)
+        elif tier == "extended" and last_eval < eight_weeks_ago:
+            ext_due.append(company)
+        else:
+            not_due.append(company)
+
+    # Innerhalb jedes Buckets: älteste zuerst
     def by_last_eval(c):
-        le = known.get(c.get("ticker", ""), {}).get("last_evaluated", "")
-        return le or "0000"
+        return known.get(c.get("ticker", ""), {}).get("last_evaluated", "") or "0000"
 
-    tier1_ipo.sort(key=by_last_eval)       # Neueste IPOs zuerst
-    tier3_overdue.sort(key=by_last_eval)   # Längste Wartezeit zuerst
-    tier3.sort(key=by_last_eval)
+    always.sort(key=lambda c: c.get("ticker", ""))  # deterministisch
+    hot.sort(key=by_last_eval)
+    triggered.sort(key=by_last_eval)
+    core_due.sort(key=by_last_eval)
+    ext_due.sort(key=by_last_eval)
+    not_due.sort(key=by_last_eval)
 
-    # Tier1_new: komplett unbekannte Firmen — alphabetisch für Determinismus
-    tier1_new.sort(key=lambda c: c.get("ticker", ""))
-
-    prioritized = tier1_ipo + tier1_new + tier2 + tier3_overdue + tier3
+    prioritized = always + hot + triggered + core_due + ext_due + not_due
     result = prioritized[:max_calls]
 
     logger.info(
-        f"Rotation — IPO/new: {len(tier1_ipo)+len(tier1_new)} "
-        f"(IPOs: {len(tier1_ipo)}, neue: {len(tier1_new)}), "
-        f"hot(≥55): {len(tier2)}, "
-        f"überfällig(>8W): {len(tier3_overdue)}, "
-        f"rotation: {len(tier3)} → {len(result)} ausgewählt"
+        f"Rotation — immer: {len(always)}, hot(≥55): {len(hot)}, "
+        f"trigger(neues Filing): {len(triggered)}, "
+        f"core fällig(>2W): {len(core_due)}, ext fällig(>8W): {len(ext_due)}, "
+        f"nicht fällig: {len(not_due)} → {len(result)} ausgewählt"
     )
     return result
 
@@ -337,7 +376,7 @@ def run_screening(config: dict, conn, run_id: str, dry_run: bool = False,
     #   2. High-scoring candidates (score ≥ 55) — re-check every week
     #   3. Oldest last_evaluated — ensures full coverage over 4 weeks
     # Result: all companies analyzed at least once/month, hot candidates weekly
-    universe = _prioritize_universe(universe, conn, max_calls)
+    universe = _prioritize_universe(universe, conn, max_calls, config=config)
     logger.info(f"After rotation priority: {len(universe)} companies queued "
                 f"(max {max_calls} LLM calls)")
 

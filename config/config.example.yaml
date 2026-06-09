@@ -18,39 +18,56 @@ universe:
     min_consecutive_negative_fcf_years: 3  # UND 3+ Jahre negativer FCF
 
   # Kohorten — bewusst BREIT gehalten, Lane-Scoring + LLM filtern
+  # Zweistufiges Rotationssystem:
+  #   rotation_tier: "core"     → alle 2 Wochen (800-1.500 Ticker)
+  #   rotation_tier: "extended" → alle 8 Wochen (Rest des Universums)
+  # Trigger-Bypass: neues Filing oder Score-Sprung → immer Tier 1
+
   cohorts:
-    - id: tech_software
-      name: "Tech & Software"
-      sic_codes: ["7370", "7371", "7372", "7373", "7374", "7375", "7376", "7377", "7378", "7379"]
-      min_market_cap_m: 200       # war 300 — IPOs und Scale-ups nicht ausschließen
-      alerting_enabled: true
-
-    - id: data_analytics
-      name: "Data & Analytics Monopolisten"
-      # Finanz-Daten, Ratings, Indices — klassische Thiel-Monopole
-      sic_codes: ["7389", "6199", "6282", "7372"]
-      min_market_cap_m: 500       # Diese sind meist schon groß
-      alerting_enabled: true
-
-    - id: specialty_industrial
-      name: "Specialty Industrials & Hidden Champions"
-      # Nischen-Industrials mit Sole-Source-Monopolen (TransDigm, Entegris etc.)
-      sic_codes: ["3728", "3679", "3674", "3672", "3669", "3577", "3571",
-                  "2819", "2860", "3841", "3826", "3825", "3812"]
-      min_market_cap_m: 300
-      alerting_enabled: true
-
+    # ── KERN-UNIVERSE (rotation_tier: core, alle 2 Wochen) ──────────────────
     - id: ipo_recent
       name: "IPOs letzte 36 Monate"
       ipo_months_back: 36
       min_market_cap_m: 100
+      rotation_tier: core         # IPOs immer wöchentlich
+      alerting_enabled: true
+
+    - id: data_analytics
+      name: "Data & Analytics Monopolisten"
+      sic_codes: ["7389", "6199", "6282", "7372"]
+      min_market_cap_m: 500
+      rotation_tier: core         # Klassische Thiel-Monopole — hohe Trefferrate
+      alerting_enabled: true
+
+    - id: tech_software_core
+      name: "Tech & Software (Kern)"
+      sic_codes: ["7372", "7374", "7375"]  # SaaS + Internet Platforms
+      min_market_cap_m: 200
+      rotation_tier: core
+      alerting_enabled: true
+
+    # ── ERWEITERTES UNIVERSE (rotation_tier: extended, alle 8 Wochen) ────────
+    - id: tech_software_extended
+      name: "Tech & Software (Erweitert)"
+      sic_codes: ["7370", "7371", "7373", "7376", "7377", "7378", "7379"]
+      min_market_cap_m: 200
+      rotation_tier: extended     # IT-Services, Peripherie — seltener Treffer
+      alerting_enabled: true
+
+    - id: specialty_industrial
+      name: "Specialty Industrials & Hidden Champions"
+      sic_codes: ["3728", "3679", "3674", "3672", "3669", "3577", "3571",
+                  "2819", "2860", "3841", "3826", "3825", "3812"]
+      min_market_cap_m: 300
+      rotation_tier: extended
       alerting_enabled: true
 
     - id: healthcare_tech
       name: "Healthcare Technology"
-      sic_codes: ["7372", "8099", "5047", "8011", "8099"]
+      sic_codes: ["7372", "8099", "5047", "8011"]
       min_market_cap_m: 200
-      alerting_enabled: true      # war false — Baseline abgeschlossen
+      rotation_tier: extended
+      alerting_enabled: true
 
 eu_universe:
   enabled: true
