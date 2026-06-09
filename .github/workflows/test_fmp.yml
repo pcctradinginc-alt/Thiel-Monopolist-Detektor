@@ -8,35 +8,58 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - run: pip install requests -q
-      - name: Test FMP API Key
+      - name: Test FMP + EODHD endpoints
         env:
           FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
+          EODHD_API_KEY: ${{ secrets.EODHD_API_KEY }}
         run: |
           python3 - << 'PYEOF'
           import requests, os
 
-          key = os.environ.get("FMP_API_KEY", "")
-          print(f"Key length: {len(key)} chars")
+          fmp_key = os.environ.get("FMP_API_KEY", "")
+          eodhd_key = os.environ.get("EODHD_API_KEY", "")
 
-          base = "https://financialmodelingprep.com/api"
-
-          # Test endpoints from free to paid
-          tests = [
-              ("/v3/profile/AAPL",         "Profile (free)"),
-              ("/v3/stock/list",            "Full stock list (paid)"),
-              ("/v3/available-traded/list", "Traded list (free)"),
-              ("/v3/financial-statement-symbol-lists", "Symbol list (free)"),
-              ("/v3/stock-screener?limit=10&exchange=XETRA", "Screener XETRA"),
-              ("/v3/stock-screener?limit=10&country=DE",     "Screener DE"),
+          print("=== FMP FREE ENDPOINTS ===")
+          fmp_tests = [
+              ("/v3/profile/SAP.DE",                        "Profile einzeln"),
+              ("/v3/stock-screener?limit=50&exchange=XETRA", "Screener XETRA"),
+              ("/v3/stock-screener?limit=50&exchange=STO",   "Screener Stockholm"),
+              ("/v3/stock-screener?limit=50&exchange=EPA",   "Screener Paris"),
+              ("/v3/stock-screener?limit=50&exchange=AMS",   "Screener Amsterdam"),
+              ("/v3/stock-screener?limit=50&exchange=SIX",   "Screener SIX"),
+              ("/v3/stock-screener?limit=50&exchange=CPH",   "Screener Kopenhagen"),
+              ("/v3/stock-screener?limit=50&exchange=OSL",   "Screener Oslo"),
+              ("/v3/quotes/XETRA",                          "XETRA alle Kurse"),
+              ("/v3/symbol/XETRA",                          "XETRA Symbole"),
+              ("/v3/exchange-symbols?exchange=XETRA",       "Exchange Symbols"),
           ]
-
-          for ep, desc in tests:
-              url = f"{base}{ep}{'&' if '?' in ep else '?'}apikey={key}"
-              r = requests.get(url, timeout=10)
+          for ep, desc in fmp_tests:
+              sep = "&" if "?" in ep else "?"
+              r = requests.get(f"https://financialmodelingprep.com/api{ep}{sep}apikey={fmp_key}", timeout=10)
               if r.status_code == 200:
-                  data = r.json()
-                  count = len(data) if isinstance(data, list) else "object"
-                  print(f"✅ {desc}: {count} results")
+                  d = r.json()
+                  cnt = len(d) if isinstance(d, list) else "obj"
+                  print(f"  ✅ {desc}: {cnt} results")
               else:
-                  print(f"❌ {desc}: HTTP {r.status_code} — {r.text[:100]}")
+                  print(f"  ❌ {desc}: HTTP {r.status_code}")
+
+          print("\n=== EODHD ENDPOINTS ===")
+          exchanges = [
+              ("XETRA", "DE", ".DE"), ("SWX", "CH", ".SW"), ("PA", "FR", ".PA"),
+              ("AS", "NL", ".AS"),    ("ST", "SE", ".ST"),  ("CO", "DK", ".CO"),
+              ("OL", "NO", ".OL"),    ("BR", "BE", ".BR"),  ("VI", "AT", ".VI"),
+              ("HE", "FI", ".HE"),
+          ]
+          total = 0
+          for ex, country, suffix in exchanges:
+              url = f"https://eodhd.com/api/exchange-symbol-list/{ex}?api_token={eodhd_key}&fmt=json&type=common_stock"
+              r = requests.get(url, timeout=15)
+              if r.status_code == 200:
+                  d = r.json()
+                  cnt = len(d) if isinstance(d, list) else 0
+                  total += cnt
+                  print(f"  ✅ {ex} ({country}): {cnt} Aktien")
+              else:
+                  print(f"  ❌ {ex}: HTTP {r.status_code} — {r.text[:80]}")
+          print(f"  → EODHD Gesamt EU: {total} Aktien")
           PYEOF
