@@ -238,8 +238,17 @@ def fetch_eu_filing_data(ticker: str, company_name: str, exchange: str = "xetra"
                 result["filing_date"] = ch_result.get("filing_date")
                 result["has_10k"] = True
 
-    # ── Text Source 3: EODHD (fallback for all EU) ───────────────────────────
-    # Only used when no text available from above sources
+    # ── Text Source 3: Wikipedia (kostenlos, ~60-70% Abdeckung) ─────────────
+    # Für Firmen die weder Bundesanzeiger noch yfinance-Beschreibung haben
+    # Primär: kleinere Nordics, Benelux, AT-Firmen
+    if not result["business_description"] and company_name:
+        from data.wikipedia_enricher import get_wikipedia_description
+        wiki_desc = get_wikipedia_description(company_name, ticker)
+        if wiki_desc:
+            result["business_description"] = wiki_desc
+            result["source_enriched"] = "wikipedia"
+
+    # ── Text Source 4: EODHD (fallback for all EU — benötigt bezahlten Plan) ─
     if not result["business_description"]:
         import os
         eodhd_key = os.environ.get("EODHD_API_KEY", "")
