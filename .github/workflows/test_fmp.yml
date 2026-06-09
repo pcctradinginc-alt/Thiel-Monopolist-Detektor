@@ -8,37 +8,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - run: pip install requests -q
-      - name: Test EODHD available endpoints
+      - name: Check EODHD plan
         env:
           EODHD_API_KEY: ${{ secrets.EODHD_API_KEY }}
         run: |
           python3 - << 'PYEOF'
-          import requests, os
-
+          import requests, os, json
           key = os.environ.get("EODHD_API_KEY", "")
-          base = "https://eodhd.com/api"
-
-          tests = [
-              (f"{base}/fundamentals/SAP.XETRA?api_token={key}&fmt=json&filter=General",         "Fundamentals General"),
-              (f"{base}/fundamentals/SAP.XETRA?api_token={key}&fmt=json&filter=Highlights",      "Fundamentals Highlights"),
-              (f"{base}/fundamentals/SAP.XETRA?api_token={key}&fmt=json&filter=Financials",      "Fundamentals Financials"),
-              (f"{base}/eod/SAP.XETRA?api_token={key}&fmt=json&period=d&limit=5",                "EOD prices"),
-              (f"{base}/real-time/SAP.XETRA?api_token={key}&fmt=json",                           "Real-time price"),
-              (f"{base}/user?api_token={key}&fmt=json",                                           "User/Plan info"),
-              (f"{base}/exchange-symbol-list/XETRA?api_token={key}&fmt=json&type=common_stock",  "Symbol list (known working)"),
-              (f"{base}/news?s=SAP.XETRA&api_token={key}&fmt=json&limit=3",                      "News"),
-              (f"{base}/calendar/earnings?api_token={key}&fmt=json&limit=5",                     "Earnings calendar"),
-          ]
-
-          for url, desc in tests:
-              r = requests.get(url, timeout=10)
-              if r.status_code == 200:
-                  d = r.json()
-                  if isinstance(d, list):
-                      print(f"  ✅ {desc}: {len(d)} items")
-                  elif isinstance(d, dict):
-                      keys = list(d.keys())[:5]
-                      print(f"  ✅ {desc}: keys={keys}")
-              else:
-                  print(f"  ❌ {desc}: HTTP {r.status_code}")
+          r = requests.get(f"https://eodhd.com/api/user?api_token={key}&fmt=json", timeout=10)
+          d = r.json()
+          print(json.dumps(d, indent=2))
           PYEOF
