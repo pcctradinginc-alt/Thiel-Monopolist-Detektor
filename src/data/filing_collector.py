@@ -189,31 +189,40 @@ def fetch_eu_filing_data(ticker: str, company_name: str, exchange: str = "xetra"
         "exchange": exchange,
     }
 
-    # Financial signals via yfinance (works for all EU exchanges)
+    # Financial signals + Business Description via yfinance
+    # longBusinessSummary ist für ~70-85% aller EU-Firmen verfügbar — kostenlos
     if YFINANCE_AVAILABLE:
         try:
             ticker_obj = yf.Ticker(ticker)
-            result["financial_signals"] = _extract_financial_signals(ticker, ticker_obj.info.get("_company"))
-            # Also capture insider ownership from prefilter signals
             info = ticker_obj.info
+
+            # ── Text Source 0: yfinance longBusinessSummary (gratis, ~70% Abdeckung) ──
+            yf_desc = info.get("longBusinessSummary", "") or ""
+            if len(yf_desc) > 100:
+                result["business_description"] = yf_desc[:4000]
+                result["source_enriched"] = "yfinance"
+                logger.debug(f"{ticker}: yfinance description {len(yf_desc)} chars")
+
+            result["financial_signals"] = _extract_financial_signals(ticker, ticker_obj.info.get("_company"))
             insider_pct = info.get("heldPercentInsiders")
             result["financial_signals"]["insider_ownership_pct"] = (
                 round(insider_pct * 100, 1) if insider_pct is not None else None
             )
             result["financial_signals"]["family_owned"] = (insider_pct or 0) > 0.20
         except Exception as e:
-            logger.warning(f"{ticker}: yfinance financial signals failed: {e}")
+            logger.warning(f"{ticker}: yfinance failed: {e}")
 
-    # ── Text Source 1: Bundesanzeiger (DE) ───────────────────────────────────
+    # ── Text Source 1: Bundesanzeiger (DE) — überschreibt yfinance wenn verfügbar ──
     if exchange in ("xetra", "eu_ipo", "eu_ipo_bafin") and company_name:
         from data.bundesanzeiger import fetch_bundesanzeiger_text
         ba_result = fetch_bundesanzeiger_text(company_name, ticker)
-        if not ba_result.get("error"):
-            result["business_description"] = ba_result.get("business_description", "")
+        if not ba_result.get("error") and ba_result.get("business_description"):
+            result["business_description"] = ba_result["business_description"]
             result["risk_factors"] = ba_result.get("risk_factors", "")
             result["mda"] = ba_result.get("mda", "")
             result["filing_date"] = ba_result.get("filing_date")
-            result["has_10k"] = bool(result["business_description"])
+            result["has_10k"] = True
+            result["source_enriched"] = "bundesanzeiger"
 
     # ── Text Source 2: Companies House (UK) ──────────────────────────────────
     if exchange in ("lse", "aim") and company_name:
