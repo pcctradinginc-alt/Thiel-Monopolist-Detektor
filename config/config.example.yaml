@@ -3,7 +3,7 @@
 
 universe:
   # Harte Filter
-  min_avg_daily_volume: 500000   # $500k/Tag — Tradability-Filter (war 10k, zu niedrig)
+  min_avg_daily_volume: 500000   # $500k/Tag — Tradability-Filter
   exclude_types:
     - ETF
     - Fund
@@ -18,35 +18,28 @@ universe:
     min_consecutive_negative_fcf_years: 3  # UND 3+ Jahre negativer FCF
 
   # ── 3-Schichten-Modell ────────────────────────────────────────────────────
-  # Schicht 1 (high_conviction):   Manuell, keine SIC-Einschränkung, wöchentlich
-  # Schicht 2 (moat_prone_sectors): Erweiterte SIC-Liste, alle 2 Wochen
-  # Schicht 3 (broad_watch):        Sehr breit, alle 6 Wochen, kein Alerting
-  #
   # rotation_tier: "core"     → alle 2 Wochen
   #                "extended" → alle 8 Wochen
   # Trigger-Bypass: neues Filing oder Score-Sprung → immer Tier 1
 
   cohorts:
     # ── SCHICHT 1: Auto-promoted High Conviction ─────────────────────────────
-    # Wird NICHT manuell gepflegt — das System befüllt diese Schicht selbst.
-    # Kriterium: monopoly_score >= 65 in mind. 2 aufeinanderfolgenden Runs
-    # → Ticker wird automatisch in diese Cohort hochgestuft (via DB)
-    # → Wöchentliche Analyse, höchste Priorität
+    # Befüllt sich selbst: monopoly_score >= 65 in mind. 2 Runs → auto-promoted
     - id: high_conviction
       name: "Auto-Promoted High Conviction"
-      sic_codes: []               # keine SIC-Einschränkung (Score entscheidet)
-      min_market_cap_m: 0         # kein Cap-Filter (Score hat Priorität)
+      sic_codes: []
+      min_market_cap_m: 0
       rotation_tier: core
       alerting_enabled: true
-      auto_promote:               # Kriterien für automatische Hochstufung
+      auto_promote:
         min_monopoly_score: 65
-        min_consecutive_runs: 2   # mind. 2 Runs mit Score >= 65
+        min_consecutive_runs: 2
 
     # ── SCHICHT 2: Moat-Prone Sektoren (SIC-basiert, alle 2 Wochen) ─────────
     - id: moat_prone_sectors
       name: "Moat-Prone Sectors"
       sic_codes:
-        # Software & Internet (bisheriger Kern)
+        # Software & Internet
         - "7370"  # Computer Programming Services
         - "7371"  # Custom Computer Programming
         - "7372"  # Prepackaged Software
@@ -55,7 +48,7 @@ universe:
         - "7375"  # Information Retrieval Services
         - "7376"  # Computer Facilities Management
         - "7379"  # Computer Systems Design NEC
-        # Daten & Information Services (sehr starke Moats)
+        # Daten & Information Services
         - "7389"  # Business Services NEC (Moody's, MSCI, S&P Global)
         - "7323"  # Credit Reporting Services
         - "6282"  # Investment Advice
@@ -68,66 +61,61 @@ universe:
         - "3825"  # Instruments for Measuring
         - "3674"  # Semiconductors
         - "3812"  # Defense Electronics
-        # Distribution mit Netzwerkeffekten / Lock-in
+        # Distribution mit Netzwerkeffekten
         - "5047"  # Medical & Hospital Equipment
         - "5065"  # Electronic Parts & Equipment
         - "5091"  # Sporting & Recreation Goods (Pool Corp)
-        # Logistik-Plattformen
         - "4731"  # Freight Transportation Arrangement
       min_market_cap_m: 200
-      rotation_tier: core         # alle 2 Wochen
+      rotation_tier: core
       alerting_enabled: true
 
-    # ── IPOs separat (immer höchste Priorität) ───────────────────────────────
+    # ── IPOs (immer höchste Priorität) ──────────────────────────────────────
     - id: ipo_recent
       name: "IPOs letzte 36 Monate"
       ipo_months_back: 36
       min_market_cap_m: 100
-      rotation_tier: core         # wöchentlich
+      rotation_tier: core
       alerting_enabled: true
 
-    # ── SCHICHT 3: Broad Watch (sehr breit, alle 6-8 Wochen) ─────────────────
+    # ── SCHICHT 3: Broad Watch (alle 8 Wochen, Baseline) ────────────────────
     - id: broad_watch
       name: "Broad Watchlist"
-      sic_codes: []               # keine SIC-Einschränkung = alle US-Aktien
-      min_market_cap_m: 150       # nur Mindest-Cap als Qualitätsfilter
-      rotation_tier: extended     # alle 8 Wochen
-      alerting_enabled: false     # erstmal nur Baseline — nach 2 Runs aktivieren
+      sic_codes: []
+      min_market_cap_m: 150
+      rotation_tier: extended
+      alerting_enabled: false     # nach 2 Baseline-Runs aktivieren
 
 eu_universe:
   enabled: true
   exchanges:
-    - xetra   # Deutschland (.DE)
-    - six     # Schweiz (.SW)
-    - aex     # Niederlande (.AS)
-    - paris   # Frankreich (.PA)
-    - omxs    # Schweden (.ST)
-    - omxh    # Finnland (.HE)
-    - omxc    # Dänemark (.CO)
-    - ose     # Norwegen (.OL)
-    - bru     # Belgien (.BR)
-    - vienna  # Österreich (.VI)
-  min_market_cap_m: 200
-  alerting_enabled: true
+    - xetra    # XETRA (DE): DAX/MDAX/SDAX/TecDAX + Hidden Champions
+    - six      # SIX Swiss Exchange (CH): SMI + SMIM
+    - aex      # Euronext Amsterdam (NL): AEX + AMX + AScX
+    - vienna   # Wiener Börse (AT): ATX Prime
+    - paris    # Euronext Paris (FR): CAC40 + SBF120
+    - omxs     # OMX Stockholm (SE): many Hidden Champions
+    - omxh     # OMX Helsinki (FI)
+    - omxc     # OMX Copenhagen (DK): Novo, Coloplast, GN
+    - ose      # Oslo Stock Exchange (NO)
+    - bru      # Euronext Brussels (BE): Barco, Melexis etc.
+  min_market_cap_m: 50            # Small Caps einschließen (€50M+)
+  ipo_months_back: 18             # EU-IPOs der letzten N Monate screenen
 
 screening:
-  # LLM-Konfiguration
   model_screening: "claude-haiku-4-5-20251001"
   model_final: "claude-sonnet-4-6"
-  max_calls_per_run: 750          # US + EU: ~10.700 Unternehmen / 750 = ~14 Wochen Rotation
+  max_calls_per_run: 750
   max_input_tokens_per_call: 12000
   rate_limit_rpm: 40
   rate_limit_tpm: 400000
+  use_batch_api: true
+  min_score_for_llm_call: 55        # Lane-Score-Schwelle vor LLM-Call
+  min_monopoly_score_alert: 65
+  min_confidence_score_alert: 60
+  min_data_quality_score_alert: 55
+  min_runs_for_strong: 2
 
-  # Scoring-Schwellen
-  use_batch_api: true               # Anthropic Batch API (50% günstiger, Ergebnisse in <24h)
-  min_score_for_llm_call: 55        # Lane-Score ab dem LLM aufgerufen wird (war 40 → ~25% weniger Calls)
-  min_monopoly_score_alert: 65      # Minimum monopoly_score für Alert
-  min_confidence_score_alert: 60    # Minimum confidence_score für Alert
-  min_data_quality_score_alert: 55  # Minimum data_quality_score für Alert
-  min_runs_for_strong: 2            # Wie viele Runs mit hohem Score für "Strong"
-
-  # Candidate Lanes — Gewichtung (kein Ausschluss, nur Ranking)
   lanes:
     hidden_wedge:
       weight: 1.0
@@ -162,47 +150,18 @@ screening:
       # Neue Keywords in aktuellem 10-K vs. Vorjahr
     manual_watchlist:
       weight: 1.0
-      tickers: []  # Hier manuell Ticker eintragen
+      tickers: []
 
 alerts:
-  # Alert-Hysterese
-  min_score_delta_for_alert: 8     # Mindestveränderung überschreibt Cooldown
-  alert_cooldown_days: 21          # Kein zweiter Alert innerhalb von X Tagen (außer Delta >= 8)
-
-  # Email-Konfiguration (via GitHub Secrets)
+  min_score_delta_for_alert: 8          # Score-Sprung überschreibt Cooldown
+  alert_cooldown_days: 21               # Kein zweiter Alert (außer Delta >= 8 oder MOAT_RISK)
+  min_consecutive_runs_for_strong: 2    # Runs mit Score >= 65 für STRONG-Status
   email_subject_prefix: "[Thiel Detector]"
-
-  # GitHub Issues
   create_github_issues: true
   github_repo: "pcctradinginc-alt/Thiel-Monopolist-Detektor"
 
-eu_universe:
-  enabled: true                   # EU-Universe aktiv (yfinance Pre-Filter + Bundesanzeiger)
-  exchanges:
-    - xetra                       # XETRA (DE): DAX/MDAX/SDAX/TecDAX + Hidden Champions
-    - six                         # SIX Swiss Exchange (CH): SMI + SMIM
-    - aex                         # Euronext Amsterdam (NL): AEX + AMX + AScX
-    - vienna                      # Wiener Börse (AT): ATX Prime
-    - paris                       # Euronext Paris (FR): CAC40 + SBF120
-    - omxs                        # OMX Stockholm (SE): many Hidden Champions
-    - omxh                        # OMX Helsinki (FI)
-    - omxc                        # OMX Copenhagen (DK): Novo, Coloplast, GN
-    - ose                         # Oslo Stock Exchange (NO)
-    - bru                         # Euronext Brussels (BE): Barco, Melexis etc.
-  min_market_cap_m: 50            # Small Caps einschließen (€50M+)
-  ipo_months_back: 18             # EU-IPOs der letzten N Monate screenen
-  eulerpool_api_key_env: "EULERPOOL_API_KEY"
-  # Pre-Filter Schwellen (yfinance, kostenlos)
-  prefilter:
-    min_gross_margin_pct: 40
-    min_operating_margin_pct: 5
-    min_revenue_growth_pct: 3
-    marketplace_om_exception_pct: 12  # Plattformen mit OM > 12% dürfen durch
-
 persistence:
-  # MVP: SQLite lokal + als Release Asset
-  # Prod: Turso (URL + Token via GitHub Secrets)
-  mode: "sqlite"          # "sqlite" oder "turso"
+  mode: "sqlite"                  # einziger unterstützter Modus
   sqlite_path: "data/thiel_detector.db"
 
 logging:

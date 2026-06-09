@@ -152,6 +152,43 @@ CREATE TABLE IF NOT EXISTS batch_runs (
     company_count INTEGER DEFAULT 0
 );
 
+-- Filing snapshots: rohe Texte + Finanzdaten pro Filing-Datum
+-- Evaluations referenzieren snapshots — Rekonstruktion ohne LLM-Output möglich
+CREATE TABLE IF NOT EXISTS filing_snapshots (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ticker TEXT NOT NULL,
+    filing_date TEXT NOT NULL,
+    source TEXT NOT NULL,              -- 'edgar_10k', 'edgar_s1', 'bundesanzeiger', 'eodhd'
+    fetched_at TEXT NOT NULL,
+
+    -- Rohtexte (nicht vom LLM verändert)
+    business_description TEXT,
+    risk_factors TEXT,
+    mda TEXT,
+    s1_text TEXT,
+
+    -- Finanzsignale (regelbasiert, nicht LLM)
+    financial_signals TEXT,            -- JSON: gross_margin, revenue_growth, sm_ratio etc.
+    keyword_hits TEXT,                 -- JSON: lock_in_keyword_hits, camouflage_keyword_hits
+    lane_score REAL,
+    lane_detail TEXT,                  -- JSON: {lane_name: score}
+
+    -- Metadaten
+    has_10k INTEGER DEFAULT 0,
+    has_s1 INTEGER DEFAULT 0,
+    has_10q INTEGER DEFAULT 0,
+    word_count INTEGER DEFAULT 0,
+
+    FOREIGN KEY (ticker) REFERENCES companies(ticker),
+    UNIQUE (ticker, filing_date, source)
+);
+
+-- Evaluations referenzieren den Filing-Snapshot der analysiert wurde
+-- (snapshot_id kann NULL sein für alte Evaluations ohne Snapshot)
+-- Migrationsschritt: ALTER TABLE evaluations ADD COLUMN snapshot_id INTEGER
+--   REFERENCES filing_snapshots(id);
+-- Wird beim ersten Start mit neuer DB automatisch gesetzt.
+
 -- Indexes
 CREATE INDEX IF NOT EXISTS idx_evaluations_ticker ON evaluations(ticker);
 CREATE INDEX IF NOT EXISTS idx_evaluations_run ON evaluations(run_id);
@@ -163,36 +200,40 @@ CREATE INDEX IF NOT EXISTS idx_feedback_verdict ON human_feedback(verdict);
 
 
 def init_db(db_path: str) -> sqlite3.Connection:
-    """Initialize SQLite database with full schema."""
+    """Initialize SQLite database with full schema. Runs migrations on existing DBs."""
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
     conn.executescript(SCHEMA_SQL)
+    _run_migrations(conn)
     conn.commit()
     logger.info(f"Database initialized at {db_path}")
     return conn
 
 
+def _run_migrations(conn: sqlite3.Connection) -> None:
+    """
+    Inkrementelle Schema-Migrationen für bestehende Datenbanken.
+    Jede Migration ist idempotent (IF NOT EXISTS / try/except).
+    """
+    migrations = [
+        # Migration 001: snapshot_id auf evaluations
+        "ALTER TABLE evaluations ADD COLUMN snapshot_id INTEGER REFERENCES filing_snapshots(id)",
+        # Migration 002: last_filing_date auf company_status (für Filing-Trigger in Rotation)
+        "ALTER TABLE company_status ADD COLUMN last_filing_date TEXT",
+    ]
+    for sql in migrations:
+        try:
+            conn.execute(sql)
+            logger.debug(f"Migration applied: {sql[:60]}...")
+        except Exception:
+            pass  # Spalte existiert bereits — normal bei bestehenden DBs
+
+
 def get_connection(config: dict) -> sqlite3.Connection:
-    """Get database connection based on config mode."""
-    mode = config.get("persistence", {}).get("mode", "sqlite")
-
-    if mode == "turso":
-        # Turso via libsql — falls back to SQLite if env vars not set
-        turso_url = os.environ.get("TURSO_URL")
-        turso_token = os.environ.get("TURSO_TOKEN")
-        if turso_url and turso_token:
-            try:
-                import libsql_client
-                # Note: libsql_client returns an async client
-                # For sync usage, we fall back to SQLite locally
-                logger.info("Turso configured — using local SQLite as sync fallback")
-            except ImportError:
-                logger.warning("libsql_client not installed, using SQLite")
-
-    # Default: SQLite
+    """Get database connection. Currently SQLite only."""
     db_path = config.get("persistence", {}).get("sqlite_path", "data/thiel_detector.db")
     return init_db(db_path)
 

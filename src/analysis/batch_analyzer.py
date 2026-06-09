@@ -118,6 +118,105 @@ Lock-in Keywords Found: {lock_in_keywords}
 Contradiction Signal: {has_contradiction}"""
 
 
+# ─── LLM Output Validation ───────────────────────────────────────────────────
+
+# Minimales Schema für LLM-Ausgaben — verhindert stille Fehler
+_REQUIRED_FIELDS = {
+    ("assessment", "scores", "monopoly_score"),
+    ("assessment", "scores", "confidence_score"),
+    ("assessment", "scores", "data_quality_score"),
+    ("assessment", "status"),
+}
+
+_VALID_ALERT_TYPES = {
+    "HIDDEN_WEDGE_DETECTED", "SUBSTITUTE_GAP_DETECTED", "LOCK_IN_STRENGTHENING",
+    "SCALE_INFLECTION", "CUSTOMER_EXPANSION_SIGNAL", "IPO_WITH_NARROW_DOMINANCE",
+    "MOAT_EVIDENCE_IMPROVED", "MOAT_RISK_DETECTED", None,
+}
+
+_VALID_STATUSES = {"STRONG", "PARTIAL", "WEAK", "NONE", "BASELINE"}
+
+
+def validate_llm_output(parsed: dict, ticker: str) -> list[str]:
+    """
+    Validiert LLM-Output gegen minimales Schema.
+    Gibt Liste von Fehlern zurück (leer = valid).
+    Wirft keine Exception — Caller entscheidet was zu tun ist.
+    """
+    errors = []
+
+    # Pflichtfelder prüfen
+    for path in _REQUIRED_FIELDS:
+        node = parsed
+        for key in path:
+            if not isinstance(node, dict) or key not in node:
+                errors.append(f"Missing field: {'.'.join(path)}")
+                break
+            node = node[key]
+
+    # Score-Ranges
+    assessment = parsed.get("assessment", {})
+    scores = assessment.get("scores", {})
+    for score_field in ("monopoly_score", "confidence_score", "data_quality_score"):
+        val = scores.get(score_field)
+        if val is not None and not (0 <= int(val) <= 100):
+            errors.append(f"{score_field}={val} outside 0-100")
+
+    # Alert-Type und Status
+    alert_type = assessment.get("alert_type")
+    if alert_type not in _VALID_ALERT_TYPES:
+        errors.append(f"Invalid alert_type: {alert_type!r}")
+
+    status = assessment.get("status")
+    if status not in _VALID_STATUSES:
+        errors.append(f"Invalid status: {status!r}")
+
+    if errors:
+        logger.warning(f"{ticker}: LLM output validation errors: {errors}")
+
+    return errors
+
+
+# ─── Data Quality Score ──────────────────────────────────────────────────────
+
+def compute_data_quality_score(filing_data: dict) -> int:
+    """
+    Regelbasierter data_quality_score (0-100).
+    Bewertet die Qualität der Eingabedaten — unabhängig vom LLM.
+
+    Warum regelbasiert statt LLM: Das LLM kann die Qualität seiner eigenen
+    Eingabe nicht objektiv bewerten (Interessenskonflikt). Ein LLM mit wenig
+    Text schreibt sich trotzdem gute Datenlage.
+    """
+    score = 0
+
+    biz  = filing_data.get("business_description", "") or ""
+    risk = filing_data.get("risk_factors", "") or ""
+    mda  = filing_data.get("mda", "") or ""
+    sigs = filing_data.get("financial_signals", {}) or {}
+
+    # ── Textquellen (max 55 Punkte) ──────────────────────────────────────────
+    biz_words = len(biz.split())
+    if biz_words >= 300:   score += 25   # vollständige Beschreibung
+    elif biz_words >= 100: score += 15   # kurze Beschreibung
+    elif biz_words >= 20:  score += 5    # Minimaltext
+
+    if len(risk.split()) >= 100: score += 15   # Risk Factors vorhanden
+    if len(mda.split())  >= 100: score += 15   # MD&A vorhanden
+
+    # ── Filing-Typ (max 15 Punkte) ───────────────────────────────────────────
+    if filing_data.get("has_10k"): score += 10
+    if filing_data.get("has_s1"):  score += 5
+
+    # ── Finanzsignale (max 30 Punkte) ────────────────────────────────────────
+    if sigs.get("gross_margin_current") is not None: score += 10
+    if sigs.get("revenue_growth_yoy")   is not None: score += 8
+    if sigs.get("gross_margin_trend")   is not None: score += 7   # historischer Trend
+    if sigs.get("sm_ratio_current")     is not None: score += 5
+
+    return min(score, 100)
+
+
 # ─── Batch Submit ─────────────────────────────────────────────────────────────
 
 def build_batch_request(ticker: str, filing_data: dict, model: str) -> dict:
@@ -125,6 +224,10 @@ def build_batch_request(ticker: str, filing_data: dict, model: str) -> dict:
     Build a single Anthropic batch request for one company.
     Returns a request dict ready for the batches API.
     """
+    # Regelbasierter data_quality_score — dem LLM als Kontext mitgeben
+    dq_score = compute_data_quality_score(filing_data)
+    filing_data = {**filing_data, "_data_quality_score": dq_score}
+
     signals_str = json.dumps(filing_data.get("financial_signals", {}), indent=2)
     biz_desc = filing_data.get("business_description", "")[:3000]
     risk_factors = filing_data.get("risk_factors", "")[:1500]
@@ -310,14 +413,31 @@ def collect_batch(batch_id: str, conn, config: dict, dry_run: bool = False) -> d
                     summary["failed"] += 1
                     continue
 
+            # Schema-Validierung — stille Fehler verhindern
+            validation_errors = validate_llm_output(parsed, ticker)
+            if len(validation_errors) > 2:
+                # Zu viele Fehler → Ergebnis unbrauchbar
+                logger.warning(f"{ticker}: {len(validation_errors)} validation errors — skipping")
+                summary["failed"] += 1
+                continue
+
             # Reconstruct the analysis dict (same shape as analyze_company output)
             assessment = parsed.get("assessment", {})
+            scores = dict(assessment.get("scores", {}))
+
+            # Regelbasierter data_quality_score überschreibt LLM-Selbstbewertung
+            filing_data_for_dq = _get_cached_filing(conn, ticker)
+            if filing_data_for_dq:
+                scores["data_quality_score"] = compute_data_quality_score(
+                    filing_data_for_dq)
+            assessment = {**assessment, "scores": scores}
+
             analysis = {
                 "ticker": ticker,
                 "market_hypotheses": parsed.get("market_hypotheses", {}),
                 "substitute_analysis": parsed.get("substitute_analysis", {}),
                 "assessment": assessment,
-                "scores": assessment.get("scores", {}),
+                "scores": scores,
                 "alert_type": assessment.get("alert_type"),
                 "status": assessment.get("status", "NONE"),
                 "tokens_used": {

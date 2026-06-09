@@ -185,9 +185,67 @@ def update_company_status(conn, ticker: str, analysis: dict, alert_outcome: dict
     conn.commit()
 
 
+def save_filing_snapshot(conn, ticker: str, filing_data: dict,
+                          lane_data: dict) -> int | None:
+    """
+    Speichert Filing-Rohdaten in filing_snapshots.
+    Gibt snapshot_id zurück (oder None bei Fehler).
+    Idempotent: bei gleichem ticker + filing_date + source wird nichts überschrieben.
+    """
+    filing_date = filing_data.get("filing_date") or "unknown"
+    source = filing_data.get("source_enriched") or (
+        "edgar_10k" if filing_data.get("has_10k") else
+        "edgar_s1"  if filing_data.get("has_s1")  else
+        "eu"        if filing_data.get("source") == "eu" else
+        "unknown"
+    )
+    biz = filing_data.get("business_description", "")
+    now = datetime.now(timezone.utc).isoformat()
+
+    try:
+        cursor = conn.execute("""
+            INSERT OR IGNORE INTO filing_snapshots
+            (ticker, filing_date, source, fetched_at,
+             business_description, risk_factors, mda, s1_text,
+             financial_signals, keyword_hits, lane_score, lane_detail,
+             has_10k, has_s1, has_10q, word_count)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            ticker, filing_date, source, now,
+            biz,
+            filing_data.get("risk_factors", ""),
+            filing_data.get("mda", ""),
+            filing_data.get("s1_text", ""),
+            json.dumps(filing_data.get("financial_signals", {})),
+            json.dumps({
+                "lock_in": filing_data.get("lock_in_keyword_hits", []),
+                "camouflage": filing_data.get("camouflage_keyword_hits", []),
+            }),
+            lane_data.get("total_lane_score", 0),
+            json.dumps(lane_data.get("lanes", {})),
+            1 if filing_data.get("has_10k") else 0,
+            1 if filing_data.get("has_s1") else 0,
+            1 if filing_data.get("has_10q") else 0,
+            len(biz.split()) if biz else 0,
+        ))
+        conn.commit()
+        if cursor.lastrowid:
+            return cursor.lastrowid
+        # Zeile existierte bereits — ID holen
+        row = conn.execute(
+            "SELECT id FROM filing_snapshots WHERE ticker=? AND filing_date=? AND source=?",
+            (ticker, filing_date, source)
+        ).fetchone()
+        return row["id"] if row else None
+    except Exception as e:
+        logger.warning(f"{ticker}: filing_snapshot save failed: {e}")
+        return None
+
+
 def save_evaluation(conn, ticker: str, run_id: str, filing_data: dict,
-                    lane_data: dict, analysis: dict, alert_outcome: dict):
-    """Persist full evaluation to DB."""
+                    lane_data: dict, analysis: dict, alert_outcome: dict,
+                    snapshot_id: int = None):
+    """Persist full evaluation to DB, referencing the filing snapshot."""
     now = datetime.now(timezone.utc).isoformat()
     assessment = analysis.get("assessment", {})
     scores = assessment.get("scores", {})
@@ -198,8 +256,8 @@ def save_evaluation(conn, ticker: str, run_id: str, filing_data: dict,
          monopoly_score, confidence_score, data_quality_score,
          market_hypotheses, contradictions_detected, llm_assessment,
          alert_type, alert_sent, status,
-         used_10k, used_s1, used_10q, filing_date)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         used_10k, used_s1, used_10q, filing_date, snapshot_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
         ticker, run_id, now,
         json.dumps(list(lane_data.get("lanes", {}).keys())),
@@ -216,7 +274,8 @@ def save_evaluation(conn, ticker: str, run_id: str, filing_data: dict,
         1 if filing_data.get("has_10k") else 0,
         1 if filing_data.get("has_s1") else 0,
         1 if filing_data.get("has_10q") else 0,
-        filing_data.get("filing_date")
+        filing_data.get("filing_date"),
+        snapshot_id,
     ))
     conn.commit()
 
@@ -476,7 +535,9 @@ def run_screening(config: dict, conn, run_id: str, dry_run: bool = False,
             )
 
             # Save everything
-            save_evaluation(conn, ticker, run_id, filing_data, lane_data, analysis, alert_outcome)
+            snapshot_id = save_filing_snapshot(conn, ticker, filing_data, lane_data)
+            save_evaluation(conn, ticker, run_id, filing_data, lane_data, analysis,
+                            alert_outcome, snapshot_id=snapshot_id)
             update_company_status(conn, ticker, analysis, alert_outcome)
 
             tracker.update(

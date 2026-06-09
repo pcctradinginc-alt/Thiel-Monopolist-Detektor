@@ -13,7 +13,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 
 def test_database_init():
-    """Database schema initializes cleanly."""
+    """Database schema initializes cleanly — inkl. filing_snapshots und Migrationen."""
     from db.database import init_db
     with tempfile.NamedTemporaryFile(suffix=".db") as f:
         conn = init_db(f.name)
@@ -23,23 +23,49 @@ def test_database_init():
         table_names = {t[0] for t in tables}
         expected = {
             "universe_cohorts", "companies", "evaluations",
-            "company_status", "human_feedback", "calibration_events", "run_state"
+            "company_status", "human_feedback", "calibration_events",
+            "run_state", "batch_runs", "filing_snapshots",
         }
         assert expected.issubset(table_names), f"Missing tables: {expected - table_names}"
-    print("✓ Database init")
+
+        # filing_snapshots hat die erwarteten Spalten
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(filing_snapshots)").fetchall()}
+        for col in ("ticker", "filing_date", "source", "business_description",
+                    "financial_signals", "lane_score", "word_count"):
+            assert col in cols, f"filing_snapshots missing column: {col}"
+
+        # evaluations hat snapshot_id (Migration)
+        eval_cols = {r[1] for r in conn.execute("PRAGMA table_info(evaluations)").fetchall()}
+        assert "snapshot_id" in eval_cols, "evaluations missing snapshot_id"
+
+        conn.close()
+    print("✓ Database init + filing_snapshots + migrations")
 
 
 def test_config_loads():
-    """Example config is valid YAML."""
+    """Config lädt, hat keine doppelten Keys, alle Pflichtfelder vorhanden."""
     import yaml
+    from collections import Counter
     config_path = Path(__file__).parent.parent / "config" / "config.example.yaml"
     with open(config_path) as f:
-        config = yaml.safe_load(f)
-    assert "universe" in config
-    assert "screening" in config
-    assert "alerts" in config
-    assert "persistence" in config
-    print("✓ Config loads")
+        text = f.read()
+
+    # Doppelte Top-Level Keys prüfen (YAML lädt nur den letzten still)
+    top_keys = [l.split(":")[0] for l in text.splitlines()
+                if l and not l.startswith(" ") and ":" in l and not l.startswith("#")]
+    dupes = {k: v for k, v in Counter(top_keys).items() if v > 1}
+    assert not dupes, f"Doppelte Keys in config.example.yaml: {dupes}"
+
+    config = yaml.safe_load(text)
+    for key in ("universe", "eu_universe", "screening", "alerts", "persistence"):
+        assert key in config, f"Missing top-level key: {key}"
+
+    # Turso nicht mehr in config
+    assert config["persistence"]["mode"] == "sqlite", "Turso sollte nicht mehr konfiguriert sein"
+
+    # eu_universe nur einmal (durch obigen dupe-Check bereits sichergestellt)
+    assert "exchanges" in config["eu_universe"]
+    print("✓ Config loads, no duplicate keys, no Turso")
 
 
 def test_lane_scoring():
@@ -127,6 +153,144 @@ def test_ticker_extraction():
     print("✓ Ticker extraction from GitHub Issue titles")
 
 
+def test_data_quality_score():
+    """data_quality_score ist regelbasiert, nicht vom LLM."""
+    from analysis.batch_analyzer import compute_data_quality_score
+
+    # Kein Text, keine Signale → niedriger Score
+    empty = {"business_description": "", "risk_factors": "", "mda": "",
+             "financial_signals": {}, "has_10k": False, "has_s1": False}
+    score_empty = compute_data_quality_score(empty)
+    assert score_empty < 20, f"Leere Daten sollten niedrigen Score haben, got {score_empty}"
+
+    # Vollständige Daten → hoher Score
+    full = {
+        "business_description": " ".join(["word"] * 400),
+        "risk_factors": " ".join(["word"] * 150),
+        "mda": " ".join(["word"] * 150),
+        "financial_signals": {
+            "gross_margin_current": 65.0,
+            "revenue_growth_yoy": 18.0,
+            "gross_margin_trend": "rising",
+            "sm_ratio_current": 22.0,
+        },
+        "has_10k": True, "has_s1": False,
+    }
+    score_full = compute_data_quality_score(full)
+    assert score_full >= 80, f"Vollständige Daten sollten hohen Score haben, got {score_full}"
+    assert score_full <= 100
+
+    print(f"✓ data_quality_score: leer={score_empty}, voll={score_full}")
+
+
+def test_llm_output_validation():
+    """JSON Schema-Validierung erkennt fehlerhafte LLM-Outputs."""
+    from analysis.batch_analyzer import validate_llm_output
+
+    valid = {
+        "assessment": {
+            "scores": {"monopoly_score": 72, "confidence_score": 68, "data_quality_score": 55},
+            "status": "PARTIAL",
+            "alert_type": "HIDDEN_WEDGE_DETECTED",
+        }
+    }
+    assert validate_llm_output(valid, "TEST") == [], "Valides Output sollte keine Fehler haben"
+
+    # Fehlende Pflichtfelder
+    missing = {"assessment": {"scores": {}, "status": "PARTIAL"}}
+    errors = validate_llm_output(missing, "TEST")
+    assert len(errors) > 0, "Fehlende Scores sollten Fehler erzeugen"
+
+    # Ungültiger Status
+    bad_status = {
+        "assessment": {
+            "scores": {"monopoly_score": 72, "confidence_score": 68, "data_quality_score": 55},
+            "status": "INVALID_STATUS",
+            "alert_type": None,
+        }
+    }
+    errors = validate_llm_output(bad_status, "TEST")
+    assert any("status" in e for e in errors), "Ungültiger Status sollte Fehler erzeugen"
+
+    print("✓ LLM output validation")
+
+
+def test_alert_policy_centralized():
+    """get_alert_policy gibt alle Policy-Parameter aus einer Quelle."""
+    import yaml
+    from alerts.alert_manager import get_alert_policy, should_send_alert
+    config_path = Path(__file__).parent.parent / "config" / "config.example.yaml"
+    with open(config_path) as f:
+        config = yaml.safe_load(f)
+
+    policy = get_alert_policy(config)
+    required_keys = {"min_monopoly_score", "min_confidence_score", "min_data_quality_score",
+                     "cooldown_days", "min_score_delta", "min_consecutive_runs",
+                     "moat_risk_always_alert"}
+    missing = required_keys - set(policy.keys())
+    assert not missing, f"get_alert_policy fehlen Keys: {missing}"
+
+    # MOAT_RISK_DETECTED ignoriert Cooldown
+    from datetime import datetime, timezone, timedelta
+    assessment = {
+        "scores": {"monopoly_score": 70, "confidence_score": 65, "data_quality_score": 60},
+        "alert_type": "MOAT_RISK_DETECTED", "status": "PARTIAL"
+    }
+    recent = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
+    prev = {"last_alert_date": recent, "monopoly_score": 68}
+    should, reason = should_send_alert("TEST", assessment, prev, config)
+    assert should, f"MOAT_RISK_DETECTED sollte Cooldown ignorieren: {reason}"
+
+    print("✓ Alert policy centralized + MOAT_RISK bypass")
+
+
+def test_filing_snapshot_save():
+    """Filing-Snapshot wird korrekt in DB gespeichert."""
+    import tempfile
+    from db.database import init_db
+
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+        db_path = f.name
+
+    conn = init_db(db_path)
+    # Company anlegen (FK-Constraint)
+    conn.execute("INSERT OR IGNORE INTO companies (ticker, name, first_seen_in_universe, is_active) VALUES ('SNAP_TEST', 'Test Co', '2024-01-01', 1)")
+    conn.commit()
+
+    # Snapshot speichern
+    import sys
+    sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+    from main import save_filing_snapshot
+
+    filing = {
+        "business_description": "mission-critical platform with switching costs " * 20,
+        "risk_factors": "highly competitive market " * 10,
+        "mda": "revenue growth improved " * 10,
+        "s1_text": "",
+        "filing_date": "2024-12-31",
+        "has_10k": True, "has_s1": False, "has_10q": False,
+        "financial_signals": {"gross_margin_current": 65.0},
+        "lock_in_keyword_hits": ["mission-critical", "switching costs"],
+        "camouflage_keyword_hits": [],
+        "source": "edgar_10k",
+    }
+    lane = {"total_lane_score": 72, "lanes": {"hidden_wedge": 80}}
+
+    snap_id = save_filing_snapshot(conn, "SNAP_TEST", filing, lane)
+    assert snap_id is not None, "Snapshot sollte gespeichert werden"
+
+    # Aus DB lesen
+    row = conn.execute("SELECT * FROM filing_snapshots WHERE ticker='SNAP_TEST'").fetchone()
+    assert row is not None
+    assert "mission-critical" in row["business_description"]
+    assert row["has_10k"] == 1
+    assert row["word_count"] > 0
+
+    conn.close()
+    import os; os.unlink(db_path)
+    print(f"✓ filing_snapshot saved (id={snap_id}, words={row['word_count']})")
+
+
 if __name__ == "__main__":
     print("Running smoke tests...\n")
     test_database_init()
@@ -134,4 +298,8 @@ if __name__ == "__main__":
     test_lane_scoring()
     test_alert_hysteresis()
     test_ticker_extraction()
+    test_data_quality_score()
+    test_llm_output_validation()
+    test_alert_policy_centralized()
+    test_filing_snapshot_save()
     print("\n✓ All smoke tests passed")

@@ -33,6 +33,24 @@ ALERT_DESCRIPTIONS = {
 }
 
 
+def get_alert_policy(config: dict) -> dict:
+    """
+    Zentrale Alert-Policy aus Config lesen.
+    Einzige Stelle wo Policy-Parameter definiert werden.
+    """
+    screening = config.get("screening", {})
+    alerts    = config.get("alerts", {})
+    return {
+        "min_monopoly_score":       screening.get("min_monopoly_score_alert", 65),
+        "min_confidence_score":     screening.get("min_confidence_score_alert", 60),
+        "min_data_quality_score":   screening.get("min_data_quality_score_alert", 55),
+        "cooldown_days":            alerts.get("alert_cooldown_days", 21),
+        "min_score_delta":          alerts.get("min_score_delta_for_alert", 8),
+        "min_consecutive_runs":     alerts.get("min_consecutive_runs_for_strong", 2),
+        "moat_risk_always_alert":   True,   # MOAT_RISK_DETECTED ignoriert Cooldown
+    }
+
+
 def should_send_alert(
     ticker: str,
     assessment: dict,
@@ -40,52 +58,47 @@ def should_send_alert(
     config: dict
 ) -> tuple[bool, str]:
     """
-    Hysteresis check: should we send an alert for this evaluation?
+    Zentrale Hysterese-Prüfung. Alle Alert-Policy-Parameter kommen
+    aus get_alert_policy() — keine Policy-Logik verteilt im Code.
 
     Returns (should_alert, reason)
     """
-    scores = assessment.get("scores", {})
+    policy = get_alert_policy(config)
+
+    scores         = assessment.get("scores", {})
     monopoly_score = scores.get("monopoly_score", 0)
-    confidence_score = scores.get("confidence_score", 0)
-    data_quality_score = scores.get("data_quality_score", 0)
-    alert_type = assessment.get("alert_type")
-    status = assessment.get("status", "NONE")
+    conf_score     = scores.get("confidence_score", 0)
+    dq_score       = scores.get("data_quality_score", 0)
+    alert_type     = assessment.get("alert_type")
 
-    thresholds = config.get("screening", {})
-    min_monopoly = thresholds.get("min_monopoly_score_alert", 65)
-    min_confidence = thresholds.get("min_confidence_score_alert", 60)
-    min_data_quality = thresholds.get("min_data_quality_score_alert", 55)
-    cooldown_days = config.get("alerts", {}).get("alert_cooldown_days", 21)
-    min_delta = config.get("alerts", {}).get("min_score_delta_for_alert", 8)
-
-    # Must have alert type
+    # 1. Alert-Typ erforderlich
     if not alert_type:
         return False, "No alert type assigned"
 
-    # Score thresholds
-    if monopoly_score < min_monopoly:
-        return False, f"monopoly_score {monopoly_score} < threshold {min_monopoly}"
-    if confidence_score < min_confidence:
-        return False, f"confidence_score {confidence_score} < threshold {min_confidence}"
-    if data_quality_score < min_data_quality:
-        return False, f"data_quality_score {data_quality_score} < threshold {min_data_quality}"
+    # 2. Score-Schwellen
+    if monopoly_score < policy["min_monopoly_score"]:
+        return False, f"monopoly_score {monopoly_score} < {policy['min_monopoly_score']}"
+    if conf_score < policy["min_confidence_score"]:
+        return False, f"confidence_score {conf_score} < {policy['min_confidence_score']}"
+    if dq_score < policy["min_data_quality_score"]:
+        return False, f"data_quality_score {dq_score} < {policy['min_data_quality_score']}"
 
-    # Cooldown check — Delta überschreibt Cooldown wenn Score signifikant gestiegen
+    # 3. Cooldown — Delta oder MOAT_RISK überschreiben
     if previous_status:
         last_alert_date = previous_status.get("last_alert_date")
         if last_alert_date:
-            last_alert = datetime.fromisoformat(last_alert_date)
-            cooldown_end = last_alert + timedelta(days=cooldown_days)
+            last_alert  = datetime.fromisoformat(last_alert_date)
+            cooldown_end = last_alert + timedelta(days=policy["cooldown_days"])
             if datetime.now(timezone.utc) < cooldown_end:
-                prev_monopoly = previous_status.get("monopoly_score", 0)
-                score_delta = monopoly_score - prev_monopoly
-                # MOAT_RISK_DETECTED oder signifikanter Score-Sprung → immer alertieren
-                if alert_type == "MOAT_RISK_DETECTED":
+                prev_score  = previous_status.get("monopoly_score", 0)
+                score_delta = monopoly_score - prev_score
+                if alert_type == "MOAT_RISK_DETECTED" and policy["moat_risk_always_alert"]:
                     pass  # immer durchlassen
-                elif score_delta >= min_delta:
-                    pass  # großer Sprung überschreibt Cooldown
+                elif score_delta >= policy["min_score_delta"]:
+                    pass  # signifikanter Sprung überschreibt Cooldown
                 else:
-                    return False, f"Within cooldown period and score delta {score_delta} < {min_delta}"
+                    return False, (f"Within {policy['cooldown_days']}d cooldown, "
+                                   f"delta {score_delta} < {policy['min_score_delta']}")
 
     return True, f"All thresholds met — alert type: {alert_type}"
 
