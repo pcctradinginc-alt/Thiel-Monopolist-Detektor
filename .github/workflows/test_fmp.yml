@@ -8,63 +8,37 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - run: pip install requests -q
-      - name: Test EODHD Fundamentals
+      - name: Test EODHD available endpoints
         env:
           EODHD_API_KEY: ${{ secrets.EODHD_API_KEY }}
         run: |
           python3 - << 'PYEOF'
-          import requests, os, json
+          import requests, os
 
           key = os.environ.get("EODHD_API_KEY", "")
+          base = "https://eodhd.com/api"
 
-          # Test 3 EU-Aktien aus verschiedenen Ländern
-          tickers = [
-              ("SAP.XETRA",    "SAP — DE"),
-              ("ASML.AS",      "ASML — NL"),
-              ("NOVO-B.CO",    "Novo Nordisk — DK"),
-              ("FORTNOX.ST",   "Fortnox — SE (Hidden Champion)"),
-              ("ADDTECH-B.ST", "Addtech — SE (Hidden Champion)"),
+          tests = [
+              (f"{base}/fundamentals/SAP.XETRA?api_token={key}&fmt=json&filter=General",         "Fundamentals General"),
+              (f"{base}/fundamentals/SAP.XETRA?api_token={key}&fmt=json&filter=Highlights",      "Fundamentals Highlights"),
+              (f"{base}/fundamentals/SAP.XETRA?api_token={key}&fmt=json&filter=Financials",      "Fundamentals Financials"),
+              (f"{base}/eod/SAP.XETRA?api_token={key}&fmt=json&period=d&limit=5",                "EOD prices"),
+              (f"{base}/real-time/SAP.XETRA?api_token={key}&fmt=json",                           "Real-time price"),
+              (f"{base}/user?api_token={key}&fmt=json",                                           "User/Plan info"),
+              (f"{base}/exchange-symbol-list/XETRA?api_token={key}&fmt=json&type=common_stock",  "Symbol list (known working)"),
+              (f"{base}/news?s=SAP.XETRA&api_token={key}&fmt=json&limit=3",                      "News"),
+              (f"{base}/calendar/earnings?api_token={key}&fmt=json&limit=5",                     "Earnings calendar"),
           ]
 
-          for eodhd_ticker, label in tickers:
-              r = requests.get(
-                  f"https://eodhd.com/api/fundamentals/{eodhd_ticker}",
-                  params={"api_token": key, "fmt": "json",
-                          "filter": "General,Highlights,Financials"},
-                  timeout=20
-              )
-              if r.status_code != 200:
-                  print(f"❌ {label}: HTTP {r.status_code}")
-                  continue
-
-              d = r.json()
-              gen  = d.get("General", {})
-              hi   = d.get("Highlights", {})
-              fin  = d.get("Financials", {})
-              inc  = fin.get("Income_Statement", {})
-              annual = inc.get("yearly", inc.get("annual", {}))
-              years = sorted(annual.keys(), reverse=True)[:3]
-
-              desc_len = len(gen.get("Description",""))
-              gm_vals = []
-              rev_vals = []
-              for yr in years:
-                  row = annual[yr]
-                  rev = row.get("totalRevenue") or row.get("revenue")
-                  gp  = row.get("grossProfit")
-                  if rev and gp and float(rev) > 0:
-                      gm_vals.append(round(float(gp)/float(rev)*100,1))
-                  if rev:
-                      rev_vals.append(float(rev))
-
-              rev_growth = None
-              if len(rev_vals) >= 2 and rev_vals[1] > 0:
-                  rev_growth = round((rev_vals[0]-rev_vals[1])/rev_vals[1]*100,1)
-
-              print(f"✅ {label}")
-              print(f"   Beschreibung: {desc_len} Zeichen")
-              print(f"   Gross Margins: {gm_vals}")
-              print(f"   Rev Growth YoY: {rev_growth}%")
-              print(f"   Sektor: {gen.get('Sector')} / {gen.get('Industry')}")
-              print()
+          for url, desc in tests:
+              r = requests.get(url, timeout=10)
+              if r.status_code == 200:
+                  d = r.json()
+                  if isinstance(d, list):
+                      print(f"  ✅ {desc}: {len(d)} items")
+                  elif isinstance(d, dict):
+                      keys = list(d.keys())[:5]
+                      print(f"  ✅ {desc}: keys={keys}")
+              else:
+                  print(f"  ❌ {desc}: HTTP {r.status_code}")
           PYEOF
