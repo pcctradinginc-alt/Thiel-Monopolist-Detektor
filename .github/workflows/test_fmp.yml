@@ -8,18 +8,63 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - run: pip install requests -q
-      - name: Test SIX exchange code
+      - name: Test EODHD Fundamentals
         env:
           EODHD_API_KEY: ${{ secrets.EODHD_API_KEY }}
         run: |
           python3 - << 'PYEOF'
-          import requests, os
+          import requests, os, json
+
           key = os.environ.get("EODHD_API_KEY", "")
-          for code in ["SW", "SWX", "VX", "EUFUND", "LSE", "BE"]:
-              r = requests.get(f"https://eodhd.com/api/exchange-symbol-list/{code}?api_token={key}&fmt=json&type=common_stock", timeout=10)
-              if r.status_code == 200:
-                  d = r.json()
-                  print(f"✅ {code}: {len(d)} Aktien — Beispiel: {d[0].get('Code','?')}.{code} / {d[0].get('Name','?')[:30]}")
-              else:
-                  print(f"❌ {code}: HTTP {r.status_code}")
+
+          # Test 3 EU-Aktien aus verschiedenen Ländern
+          tickers = [
+              ("SAP.XETRA",    "SAP — DE"),
+              ("ASML.AS",      "ASML — NL"),
+              ("NOVO-B.CO",    "Novo Nordisk — DK"),
+              ("FORTNOX.ST",   "Fortnox — SE (Hidden Champion)"),
+              ("ADDTECH-B.ST", "Addtech — SE (Hidden Champion)"),
+          ]
+
+          for eodhd_ticker, label in tickers:
+              r = requests.get(
+                  f"https://eodhd.com/api/fundamentals/{eodhd_ticker}",
+                  params={"api_token": key, "fmt": "json",
+                          "filter": "General,Highlights,Financials"},
+                  timeout=20
+              )
+              if r.status_code != 200:
+                  print(f"❌ {label}: HTTP {r.status_code}")
+                  continue
+
+              d = r.json()
+              gen  = d.get("General", {})
+              hi   = d.get("Highlights", {})
+              fin  = d.get("Financials", {})
+              inc  = fin.get("Income_Statement", {})
+              annual = inc.get("yearly", inc.get("annual", {}))
+              years = sorted(annual.keys(), reverse=True)[:3]
+
+              desc_len = len(gen.get("Description",""))
+              gm_vals = []
+              rev_vals = []
+              for yr in years:
+                  row = annual[yr]
+                  rev = row.get("totalRevenue") or row.get("revenue")
+                  gp  = row.get("grossProfit")
+                  if rev and gp and float(rev) > 0:
+                      gm_vals.append(round(float(gp)/float(rev)*100,1))
+                  if rev:
+                      rev_vals.append(float(rev))
+
+              rev_growth = None
+              if len(rev_vals) >= 2 and rev_vals[1] > 0:
+                  rev_growth = round((rev_vals[0]-rev_vals[1])/rev_vals[1]*100,1)
+
+              print(f"✅ {label}")
+              print(f"   Beschreibung: {desc_len} Zeichen")
+              print(f"   Gross Margins: {gm_vals}")
+              print(f"   Rev Growth YoY: {rev_growth}%")
+              print(f"   Sektor: {gen.get('Sector')} / {gen.get('Industry')}")
+              print()
           PYEOF
