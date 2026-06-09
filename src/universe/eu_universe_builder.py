@@ -716,21 +716,21 @@ def build_eu_universe(config: dict, conn) -> list[dict]:
 
     logger.info(f"EU universe (seeds+live): {len(companies)} candidates across {len(enabled_exchanges)} exchanges")
 
-    # ── FMP: bulk EU stock list (1 API call, ~1000+ EU tickers) ──────────────
+    # ── EODHD: bulk EU stock list (~3.200 Aktien, 10 API calls) ─────────────
     import os
-    fmp_key = os.environ.get("FMP_API_KEY", "")
-    if fmp_key:
-        from universe.fmp_universe import fetch_fmp_eu_universe
-        fmp_companies = fetch_fmp_eu_universe(fmp_key)
-        fmp_added = 0
-        for company in fmp_companies:
+    eodhd_key = os.environ.get("EODHD_API_KEY", "")
+    if eodhd_key:
+        from universe.eodhd_universe import fetch_eodhd_eu_universe
+        eodhd_companies = fetch_eodhd_eu_universe(eodhd_key)
+        eodhd_added = 0
+        for company in eodhd_companies:
             if company["ticker"] not in seen_tickers:
                 seen_tickers.add(company["ticker"])
                 companies.append(company)
-                fmp_added += 1
-        logger.info(f"FMP added {fmp_added} new EU tickers (total now: {len(companies)})")
+                eodhd_added += 1
+        logger.info(f"EODHD added {eodhd_added} new EU tickers (total now: {len(companies)})")
     else:
-        logger.info("FMP_API_KEY not set — using seeds only for EU universe")
+        logger.info("EODHD_API_KEY not set — using seeds only for EU universe")
 
     # ── EU IPOs: upcoming + recent via all sources ────────────────────────────
     ipo_months = eu_config.get("ipo_months_back", 18)
