@@ -174,7 +174,8 @@ def build_universe(config: dict, conn) -> list[dict]:
     Returns list of company dicts ready for screening.
     """
     cohorts = config.get("universe", {}).get("cohorts", [])
-    min_volume = config.get("universe", {}).get("min_avg_daily_volume", 10000)
+    universe_cfg = config.get("universe", {})
+    min_volume = universe_cfg.get("min_avg_daily_volume", 500_000)
 
     # Step 1: Fetch all companies from SEC EDGAR (most stable source)
     all_companies = fetch_universe_via_edgar()
@@ -183,7 +184,7 @@ def build_universe(config: dict, conn) -> list[dict]:
         logger.error("No companies fetched — aborting universe build")
         return []
 
-    # Step 2: Hard filter (only listing criteria)
+    # Step 2: Hard filter — name-based exclusions only (ETF, Fund, Warrant etc.)
     valid_companies = [
         c for c in all_companies
         if is_valid_common_stock(c["ticker"], c["name"])

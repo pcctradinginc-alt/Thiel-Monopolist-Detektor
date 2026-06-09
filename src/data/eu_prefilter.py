@@ -90,11 +90,18 @@ def yfinance_thiel_prefilter(ticker: str, exchange_suffix: str = "") -> dict:
             result["disqualification"] = f"market cap €{market_cap/1e6:.1f}M < €{MIN_MARKET_CAP_EUR/1e6:.0f}M minimum"
             return result
 
-        # ── Hard exclusion 3: zombie company (no revenue + negative FCF) ────
+        # ── Hard exclusion 3: zombie company ────────────────────────────────
+        # Fall A: Kein Umsatz + großer negativer FCF (Shell/Zombie)
         if (total_revenue == 0 and
                 free_cashflow is not None and free_cashflow < -50_000_000):
             result["passes"] = False
             result["disqualification"] = "no revenue + large negative FCF — zombie/shell company"
+            return result
+        # Fall B: Mini-Revenue < $10M + negativer FCF (Pre-Revenue Startup ohne Moat-Signal)
+        if (0 < total_revenue < 10_000_000 and
+                free_cashflow is not None and free_cashflow < 0):
+            result["passes"] = False
+            result["disqualification"] = f"revenue ${total_revenue/1e6:.1f}M < $10M + negative FCF — too early stage"
             return result
 
         # ── Soft signal: Real Estate — rarely has Thiel moat ────────────────

@@ -2,8 +2,8 @@
 # Kopiere diese Datei nach config.yaml und passe sie an
 
 universe:
-  # Harte Filter (alles andere ist nur Ranking)
-  min_avg_daily_volume: 10000
+  # Harte Filter
+  min_avg_daily_volume: 500000   # $500k/Tag — Tradability-Filter (war 10k, zu niedrig)
   exclude_types:
     - ETF
     - Fund
@@ -12,18 +12,32 @@ universe:
     - Unit
     - ADR
 
-  # Startkohorten (werden nacheinander freigeschaltet)
+  # Zombie-Filter — wird in eu_prefilter + universe_builder angewendet
+  zombie_filter:
+    max_revenue_m: 10             # Revenue < $10M
+    min_consecutive_negative_fcf_years: 3  # UND 3+ Jahre negativer FCF
+
+  # Kohorten — bewusst BREIT gehalten, Lane-Scoring + LLM filtern
   cohorts:
     - id: tech_software
       name: "Tech & Software"
-      sic_codes: ["7370", "7371", "7372", "7374", "7379"]
-      min_market_cap_m: 300
+      sic_codes: ["7370", "7371", "7372", "7373", "7374", "7375", "7376", "7377", "7378", "7379"]
+      min_market_cap_m: 200       # war 300 — IPOs und Scale-ups nicht ausschließen
       alerting_enabled: true
 
-    - id: internet_platform
-      name: "Internet Platforms"
-      sic_codes: ["7375"]
-      min_market_cap_m: 200
+    - id: data_analytics
+      name: "Data & Analytics Monopolisten"
+      # Finanz-Daten, Ratings, Indices — klassische Thiel-Monopole
+      sic_codes: ["7389", "6199", "6282", "7372"]
+      min_market_cap_m: 500       # Diese sind meist schon groß
+      alerting_enabled: true
+
+    - id: specialty_industrial
+      name: "Specialty Industrials & Hidden Champions"
+      # Nischen-Industrials mit Sole-Source-Monopolen (TransDigm, Entegris etc.)
+      sic_codes: ["3728", "3679", "3674", "3672", "3669", "3577", "3571",
+                  "2819", "2860", "3841", "3826", "3825", "3812"]
+      min_market_cap_m: 300
       alerting_enabled: true
 
     - id: ipo_recent
@@ -34,9 +48,9 @@ universe:
 
     - id: healthcare_tech
       name: "Healthcare Technology"
-      sic_codes: ["7372", "8099", "5047"]
-      min_market_cap_m: 300
-      alerting_enabled: false  # Baseline läuft noch
+      sic_codes: ["7372", "8099", "5047", "8011", "8099"]
+      min_market_cap_m: 200
+      alerting_enabled: true      # war false — Baseline abgeschlossen
 
 eu_universe:
   enabled: true

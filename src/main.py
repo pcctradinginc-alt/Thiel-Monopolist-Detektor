@@ -223,15 +223,16 @@ def save_evaluation(conn, ticker: str, run_id: str, filing_data: dict,
 
 def _prioritize_universe(universe: list[dict], conn, max_calls: int) -> list[dict]:
     """
-    Sort universe for 4-week rotation:
-      Tier 1 (always): IPOs + never analyzed
-      Tier 2 (weekly): score ≥ 55 candidates (hot leads)
-      Tier 3 (rotation): everyone else, oldest-first
-    Caps at max_calls so every company appears in exactly one run/month.
+    Rotation-Priorität (4 Tiers):
+      Tier 1 — IPOs + nie analysiert: immer dabei, älteste zuerst
+      Tier 2 — Hot Leads (Score ≥ 55): wöchentlich wiederholen
+      Tier 3 — Rotation: alle anderen, älteste zuerst (FIFO)
+      Tier 4 — Überfällig (> 8 Wochen nicht gesehen): vorgezogen aus Tier 3
+
+    Philosophie: "nie analysiert" ist teurer als "lange nicht analysiert".
     """
     from datetime import datetime, timezone, timedelta
 
-    # Fetch last_evaluated + monopoly_score from DB for all tickers
     known = {}
     rows = conn.execute(
         "SELECT ticker, last_evaluated, monopoly_score FROM company_status"
@@ -243,42 +244,59 @@ def _prioritize_universe(universe: list[dict], conn, max_calls: int) -> list[dic
         }
 
     now = datetime.now(timezone.utc)
-    four_weeks_ago = now - timedelta(days=28)
+    eight_weeks_ago = now - timedelta(days=56)
 
-    tier1, tier2, tier3 = [], [], []
+    tier1_new, tier1_ipo = [], []   # nie analysiert: neue zuerst, dann IPOs
+    tier2, tier3_overdue, tier3 = [], [], []
 
     for company in universe:
         ticker = company.get("ticker", "")
         info = known.get(ticker, {})
-        last_eval = info.get("last_evaluated")
+        last_eval_str = info.get("last_evaluated")
         score = info.get("monopoly_score", 0)
         is_ipo = company.get("cohort_id") in ("eu_ipo", "ipo_recent") or \
                  company.get("source") == "ipo"
 
-        if is_ipo or not last_eval:
-            tier1.append(company)
+        if not last_eval_str:
+            # Nie analysiert — IPOs separat für bessere Priorisierung
+            if is_ipo:
+                tier1_ipo.append(company)
+            else:
+                tier1_new.append(company)
         elif score >= 55:
             tier2.append(company)
         else:
-            tier3.append(company)
+            # Überfällig (> 8 Wochen) → vorgezogen
+            try:
+                last_eval = datetime.fromisoformat(last_eval_str)
+                if last_eval < eight_weeks_ago:
+                    tier3_overdue.append(company)
+                else:
+                    tier3.append(company)
+            except Exception:
+                tier3.append(company)
 
-    # Sort tier3 by last_evaluated ascending (oldest first)
-    def sort_key(c):
-        info = known.get(c.get("ticker", ""), {})
-        le = info.get("last_evaluated")
-        if not le:
-            return "0000"
-        return le
+    # Sortierung innerhalb Tiers
+    def by_last_eval(c):
+        le = known.get(c.get("ticker", ""), {}).get("last_evaluated", "")
+        return le or "0000"
 
-    tier3.sort(key=sort_key)
+    tier1_ipo.sort(key=by_last_eval)       # Neueste IPOs zuerst
+    tier3_overdue.sort(key=by_last_eval)   # Längste Wartezeit zuerst
+    tier3.sort(key=by_last_eval)
 
-    prioritized = tier1 + tier2 + tier3
+    # Tier1_new: komplett unbekannte Firmen — alphabetisch für Determinismus
+    tier1_new.sort(key=lambda c: c.get("ticker", ""))
+
+    prioritized = tier1_ipo + tier1_new + tier2 + tier3_overdue + tier3
     result = prioritized[:max_calls]
 
     logger.info(
-        f"Rotation tiers — IPO/new: {len(tier1)}, "
-        f"hot (≥55): {len(tier2)}, "
-        f"rotation: {len(tier3)} → {len(result)} selected"
+        f"Rotation — IPO/new: {len(tier1_ipo)+len(tier1_new)} "
+        f"(IPOs: {len(tier1_ipo)}, neue: {len(tier1_new)}), "
+        f"hot(≥55): {len(tier2)}, "
+        f"überfällig(>8W): {len(tier3_overdue)}, "
+        f"rotation: {len(tier3)} → {len(result)} ausgewählt"
     )
     return result
 
