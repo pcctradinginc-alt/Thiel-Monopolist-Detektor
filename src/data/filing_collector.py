@@ -536,6 +536,27 @@ def compute_lane_scores(filing_data: dict, config: dict) -> dict:
         lanes["filing_change"] = min(filing_data["keyword_count"] * 3, 60)
         total_score += lanes["filing_change"]
 
+    # Lane 6: Financial Quality Signal (Daten/Infrastruktur-Monopole ohne SaaS-Keywords)
+    # Hohe Gross Margin + Wachstum = starkes Moat-Signal unabhängig von Keywords
+    # Behebt: CSGP/CME/MCO bekommen Lane-Score 0 weil keine lock-in Keywords
+    gm = signals.get("gross_margin_current", 0) or 0
+    rev_growth = signals.get("revenue_growth_yoy", 0) or 0
+    if gm >= 70 and rev_growth >= 8:
+        # Starkes finanzielles Moat-Signal: hohe Marge + Wachstum
+        fin_score = 50
+        if gm >= 80:
+            fin_score += 15
+        if rev_growth >= 15:
+            fin_score += 10
+        if signals.get("sm_ratio_declining"):
+            fin_score += 10  # fallende S&M-Ratio = struktureller Vorteil
+        lanes["financial_quality"] = min(fin_score, 85)
+        total_score += lanes["financial_quality"]
+    elif gm >= 60 and rev_growth >= 5:
+        # Moderates Signal — reicht für LLM-Call
+        lanes["financial_quality"] = 30
+        total_score += 30
+
     return {
         "lanes": lanes,
         "total_lane_score": min(total_score, 300),

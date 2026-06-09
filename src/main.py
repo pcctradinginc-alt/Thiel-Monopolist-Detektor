@@ -32,7 +32,7 @@ from universe.eu_universe_builder import build_eu_universe
 from data.filing_collector import fetch_filing_data, fetch_eu_filing_data, compute_lane_scores as compute_lanes
 from data.eu_prefilter import batch_prefilter
 from analysis.llm_analyzer import analyze_company
-from analysis.batch_analyzer import submit_batch, collect_batch, get_pending_batch
+from analysis.batch_analyzer import submit_batch, collect_batch, get_pending_batch, compute_data_quality_score
 from alerts.alert_manager import process_alerts
 from feedback.feedback_processor import process_feedback
 
@@ -606,7 +606,12 @@ def main():
         max_calls = screening_cfg.get("max_calls_per_run", 150)
         manual_watchlist = screening_cfg.get("lanes", {}).get("manual_watchlist", {}).get("tickers", [])
 
+        # high_conviction Ticker immer einschließen (ignorieren leere-Daten-Filter)
+        from universe.universe_builder import _get_auto_promoted
+        high_conviction = _get_auto_promoted(conn, config)
+
         companies_with_filings = []
+        skipped_empty = 0
         for company in universe:
             ticker = company.get("ticker", "")
             if not ticker or len(companies_with_filings) >= max_calls:
@@ -615,11 +620,33 @@ def main():
                 filing_data = fetch_eu_filing_data(ticker, company.get("name", ""), company.get("exchange", "xetra"))
             else:
                 filing_data = fetch_filing_data(ticker, cik=company.get("cik"))
+
             lane_data = compute_lanes(filing_data, config)
-            if lane_data.get("total_lane_score", 0) >= min_lane_score or ticker in manual_watchlist:
-                # Filing-Snapshot persistieren bevor Batch submitted wird
+            lane_score = lane_data.get("total_lane_score", 0)
+
+            # Fix 6: Logging für Datenqualität
+            biz_words = len((filing_data.get("business_description") or "").split())
+            dq = compute_data_quality_score(filing_data)
+            logger.debug(
+                f"{ticker}: biz_words={biz_words}, dq={dq}, "
+                f"lane={lane_score}, has_10k={filing_data.get('has_10k')}, "
+                f"signals={len(filing_data.get('financial_signals', {}))}"
+            )
+
+            # Fix 1: Leere Daten vor LLM blockieren
+            # Ausnahme: high_conviction und manual_watchlist immer einschließen
+            is_privileged = ticker in high_conviction or ticker in manual_watchlist
+            if not is_privileged and dq < 20:
+                logger.info(f"{ticker}: data_quality={dq} < 20, no text — skipped (save API cost)")
+                skipped_empty += 1
+                continue
+
+            if lane_score >= min_lane_score or is_privileged:
                 save_filing_snapshot(conn, ticker, filing_data, lane_data)
                 companies_with_filings.append((ticker, filing_data))
+
+        if skipped_empty:
+            logger.info(f"Skipped {skipped_empty} companies with empty data (dq < 20)")
 
         batch_id = submit_batch(companies_with_filings, config, conn, run_id)
         if batch_id:

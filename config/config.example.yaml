@@ -66,6 +66,11 @@ universe:
         - "5065"  # Electronic Parts & Equipment
         - "5091"  # Sporting & Recreation Goods (Pool Corp)
         - "4731"  # Freight Transportation Arrangement
+        # Netzwerk-Infrastruktur (Exchange/Transport Monopole)
+        - "4213"  # Trucking (ODFL, Saia — LTL Netzwerk-Monopol)
+        - "4011"  # Railroads (Infrastruktur-Moat)
+        - "6221"  # Commodity Contracts Dealers (CME — Derivatives Exchange)
+        - "6211"  # Security Brokers (IBKR — Broker-Technologie Lock-in)
       min_market_cap_m: 200
       rotation_tier: core
       alerting_enabled: true

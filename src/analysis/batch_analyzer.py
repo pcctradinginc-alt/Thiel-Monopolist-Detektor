@@ -46,6 +46,20 @@ Peter Thiel's framework (Zero to One):
 - 4 criteria: Proprietary Technology (10x better), Network Effects, Economies of Scale, Branding
 - Test: does the company have NO close substitute? Do customers stay because switching is impossible?
 
+ADDITIONAL MOAT TYPES — often missed, score these as high as SaaS moats:
+- REGULATORY MONOPOLY: requires government license/certification competitors cannot easily obtain
+  (e.g. credit ratings agencies, exchange operators, specialized medical device certifications)
+- SOLE-SOURCE CERTIFICATION: only FAA/FDA/regulatory-approved supplier for a specific part
+  (e.g. aerospace components where switching supplier requires years of re-certification)
+- DATA NETWORK MOAT: dataset improves as more participants contribute, self-reinforcing
+  (e.g. commercial real estate database where more listings = more buyers = more listings)
+- EXCHANGE/CLEARING INFRASTRUCTURE: settlement or clearing layer every market participant must use
+  (e.g. derivatives exchanges where open interest creates lock-in at ecosystem level)
+- COMPLIANCE-DRIVEN SWITCHING COST: customers legally or contractually required to use this output
+  (e.g. credit scores where banks' regulatory frameworks mandate a specific vendor's score)
+- DISTRIBUTOR MONOPOLY: sole or dominant national distributor in a niche, making alternatives logistically impractical
+  (e.g. pool equipment distributor serving 95% of US pool contractors)
+
 STAGE 1 — Market Hypothesis: What narrow market might this company actually dominate?
 STAGE 2 — Substitute Gap: Is there a realistic alternative? How hard is switching?
 STAGE 3 — Audit: Score each criterion with evidence AND counter-evidence. Be skeptical.
@@ -54,6 +68,7 @@ CRITICAL RULES:
 - Provide counter-evidence for every criterion — a weak counter-evidence section is a failure
 - Do not construct a narrative. Find the strongest case FOR and AGAINST.
 - All scores 0-100. Alert only if monopoly_score > 65.
+- A company with regulatory/certification/compliance moat can score 80+ even without software lock-in.
 
 Return ONLY valid JSON matching this exact schema:
 

@@ -36,121 +36,80 @@ except ImportError:
 # Format: (base_ticker, company_name)
 
 XETRA_SEEDS = [
-    # DAX 40
+    # ── DAX 40 ───────────────────────────────────────────────────────────────
     ("ADS", "Adidas AG"), ("AIR", "Airbus SE"), ("ALV", "Allianz SE"),
     ("BAS", "BASF SE"), ("BAYN", "Bayer AG"), ("BEI", "Beiersdorf AG"),
     ("BMW", "BMW AG"), ("BNR", "Brenntag SE"), ("CON", "Continental AG"),
     ("1COV", "Covestro AG"), ("DHER", "Delivery Hero SE"), ("DB1", "Deutsche Boerse AG"),
     ("DBK", "Deutsche Bank AG"), ("DHL", "Deutsche Post AG"), ("DTE", "Deutsche Telekom AG"),
     ("EOAN", "E.ON SE"), ("FRE", "Fresenius SE"), ("FME", "Fresenius Medical Care AG"),
-    ("HEI", "HeidelbergCement AG"), ("HEN3", "Henkel AG"), ("IFX", "Infineon Technologies AG"),
+    ("HEIA", "HeidelbergMaterials AG"), ("HEN3", "Henkel AG"), ("IFX", "Infineon Technologies AG"),
     ("MBG", "Mercedes-Benz Group AG"), ("MRK", "Merck KGaA"), ("MTX", "MTU Aero Engines AG"),
     ("MUV2", "Munich Re AG"), ("PAH3", "Porsche Automobil Holding SE"),
-    ("P911", "Porsche AG"), ("PUMA", "PUMA SE"), ("RWE", "RWE AG"),
+    ("P911", "Porsche AG"), ("PUM", "PUMA SE"), ("RWE", "RWE AG"),
     ("SAP", "SAP SE"), ("SHL", "Siemens Healthineers AG"), ("SIE", "Siemens AG"),
     ("SY1", "Symrise AG"), ("VNA", "Vonovia SE"), ("VOW3", "Volkswagen AG"),
-    ("ZAL", "Zalando SE"), ("ENR", "Siemens Energy AG"), ("NVDA", "NVIDIA (XETRA)"),
-    ("2222", "Saudi Aramco (XETRA)"), ("QIA", "Qiagen NV"),
+    ("ZAL", "Zalando SE"), ("ENR", "Siemens Energy AG"), ("QIA", "Qiagen NV"),
 
-    # MDAX (mid cap, high Thiel potential)
+    # ── MDAX — hohe Thiel-Dichte ─────────────────────────────────────────────
     ("AFX", "Carl Zeiss Meditec AG"), ("AIXA", "Aixtron SE"),
-    ("AOF", "Atoss Software AG"), ("ARR", "Arrhenius Pharma AG"),
-    ("BC8", "Bechtle AG"), ("BDT", "Bertrandt AG"), ("BOSS", "Hugo Boss AG"),
-    ("COP", "Comdirect Bank AG"), ("CWC", "Cancom SE"), ("DKBK", "Deutsche Kreditbank AG"),
-    ("DWS", "DWS Group GmbH"), ("ECK", "Eckert & Ziegler AG"),
+    ("AOF", "Atoss Software AG"),     # HR-Software, ~80% GM, Lock-in
+    ("BC8", "Bechtle AG"), ("BOSS", "Hugo Boss AG"),
+    ("CWC", "Cancom SE"), ("DWS", "DWS Group GmbH"),
+    ("ECK", "Eckert & Ziegler AG"),   # Radioaktive Isotope, regulatorischer Moat
     ("EVD", "CTS Eventim AG"), ("EVK", "Evonik Industries AG"),
     ("FNTN", "freenet AG"), ("GBF", "Bilfinger SE"), ("GFJ", "Grenke AG"),
-    ("HAB", "Hamborner REIT AG"), ("HAG", "Hensoldt AG"), ("HAW", "Hawesko Holding AG"),
-    ("HDD", "Heidelberger Druckmaschinen AG"), ("HFG", "HelloFresh SE"),
-    ("HOT", "Hochtief AG"), ("HYQ", "Hypoport SE"), ("JNXS", "Jungheinrich AG"),
+    ("HAG", "Hensoldt AG"), ("HAW", "Hawesko Holding AG"),
+    ("HFG", "HelloFresh SE"), ("HOT", "Hochtief AG"),
+    ("HYQ", "Hypoport SE"),           # Kredit-Plattform für Banken
     ("KGX", "Kion Group AG"), ("KSB3", "KSB SE"), ("LEG", "LEG Immobilien SE"),
-    ("LHA", "Lufthansa AG"), ("MDG1", "Medigene AG"), ("MED", "Medios AG"),
-    ("MELN", "Mynaric AG"), ("NEM", "Nemetschek SE"), ("NOEJ", "Novabase AG"),
-    ("OHB", "OHB SE"), ("OSR", "Osram Licht AG"), ("PSAN", "ProSiebenSat.1 Media SE"),
-    ("RAA", "RATIONAL AG"), ("RRTL", "RTL Group SA"), ("RTO4", "Rentokil Initial (XETRA)"),
-    ("S92", "SMA Solar Technology AG"), ("SBS", "Stratec SE"),
-    ("SDX", "SGL Carbon SE"), ("SGCG", "Siltronic AG"), ("SIX2", "Sixt SE"),
+    ("LHA", "Lufthansa AG"), ("MED", "Medios AG"),
+    ("NEM", "Nemetschek SE"),         # BIM-Software, starker Lock-in
+    ("OHB", "OHB SE"), ("PSAN", "ProSiebenSat.1 Media SE"),
+    ("RAA", "RATIONAL AG"),           # Profi-Küchentech, 50%+ Weltmarktanteil
+    ("RRTL", "RTL Group SA"),
+    ("S92", "SMA Solar Technology AG"), ("SBS", "Stratec SE"),  # OEM Sole-Source
+    ("SGCG", "Siltronic AG"), ("SIX2", "Sixt SE"),
     ("SMHN", "SUESS MicroTec SE"), ("SOW", "Software AG"), ("SPM", "Stabilus SE"),
-    ("SRTX", "Sartorius Stedim Biotech"), ("SRT3", "Sartorius AG"),
+    ("SRT3", "Sartorius AG"),
     ("TAG", "TAG Immobilien AG"), ("TIM", "Traton SE"), ("TLX", "Talanx AG"),
-    ("TUI1", "TUI AG"), ("VBK", "Verbio SE"), ("VH2", "Vitesco Technologies Group AG"),
-    ("VIB3", "Villeroy & Boch AG"), ("VOS", "Vossloh AG"), ("WAF", "Siltronic AG"),
+    ("TUI1", "TUI AG"), ("VBK", "Verbio SE"),
+    ("VIB3", "Villeroy & Boch AG"), ("VOS", "Vossloh AG"),
     ("WBAG", "Westwing Group SE"), ("WCH", "Wacker Chemie AG"),
 
-    # TecDAX (highest Thiel density)
-    ("AT1", "Aroundtown SA"), ("BFSA", "Befesa SA"), ("CA1", "Canopy Growth (XETRA)"),
-    ("DBAN", "Deutsche Beteiligungs AG"), ("DIC", "DIC Asset AG"),
-    ("EMH", "Eckert & Ziegler Strahlen"), ("FPH", "flatexDEGIRO AG"),
-    ("GFT", "GFT Technologies SE"), ("GOS", "Gosen AG"),
-    ("HAG2", "Hamborner AG"), ("IINX", "Inxmail GmbH"), ("IOS", "IONOS Group SE"),
-    ("ISH2", "Ishares (XETRA)"), ("ITN", "Internxt AG"),
-    ("MBB", "MBB SE"), ("MCH", "Mach7 Technologies"),
-    ("MORG", "Morgan Advanced (XETRA)"), ("NA9", "Nagarro SE"),
-    ("NFON", "NFON AG"), ("PSH", "PSI Software SE"),
-    ("R3NK", "Renk Group AG"), ("RENE", "Renergetica AG"),
-    ("SFQ", "SAF-Holland SE"), ("SGF", "Software AG"),
-    ("SMHN2", "SUESS MicroTec"), ("TELN", "Telenet Group"),
-    ("UTDI", "United Internet AG"), ("VAR1", "VARTA AG"),
-    ("VIE", "Vienna International Airport"), ("WDP", "Warehouses De Pauw"),
-    ("XTP", "Xentis AG"), ("YSN", "Ypsomed Holding"),
+    # ── TecDAX — höchste Thiel-Dichte ────────────────────────────────────────
+    ("BFSA", "Befesa SA"), ("DBAN", "Deutsche Beteiligungs AG"),
+    ("GFT", "GFT Technologies SE"),   # Fintech-IT tief in Banken integriert
+    ("IOS", "IONOS Group SE"),        # Cloud-Hosting KMU, Switching Costs
+    ("MBB", "MBB SE"),                # Beteiligungsges. Hidden Champions
+    ("NA9", "Nagarro SE"),            # Software Engineering Platform
+    ("PSH", "PSI Software SE"),       # Energie/Industrie ERP
+    ("R3NK", "Renk Group AG"),        # Getriebe Verteidigung/Marine
+    ("SFQ", "SAF-Holland SE"),
+    ("UTDI", "United Internet AG"),
+    ("VIE", "Vienna International Airport"),
+    ("WDP", "Warehouses De Pauw"),
 
-    # ── Hidden Champions — nicht in Indices aber hohe Thiel-Relevanz ──
-    # B2B-Software mit hohen Switching Costs, Nischenmarktführer, Family-owned
-    ("AOF", "Atoss Software AG"),          # HR-Software DACH, ~80% GM, starker Lock-in
-    ("HYQ", "Hypoport SE"),                # Kredit-Plattform für dt. Banken
-    ("PSI", "PSI Software SE"),            # Energie/Industrie ERP, hohe Switching Costs
-    ("ADN1", "Adesso SE"),                 # IT-Consulting Branchen-Spezialist
-    ("GFT", "GFT Technologies SE"),        # Fintech-IT, tief in Banken integriert
-    ("NA9", "Nagarro SE"),                 # Software Engineering Platform
-    ("RAA", "RATIONAL AG"),               # Profi-Küchentech, 50%+ Weltmarktanteil
-    ("KTN", "Kontron AG"),                # Embedded Computing B2B
-    ("NFON", "NFON AG"),                  # Cloud-Telefonie KMU
-    ("CLIQ", "CLIQ Digital AG"),          # Digital-Abo Nischenplattform
-    ("DBO", "Drägerwerk AG"),             # Medizin/Sicherheitstechnik, Mission-Critical
-    ("SBS", "Stratec SE"),                # Laborautomation OEM, Sole-Source-Lieferant
-    ("SMH", "Schmolz+Bickenbach AG"),     # Spezialstahl, Nischenmarktführer
-    ("ECK", "Eckert & Ziegler AG"),       # Radioaktive Isotope, regulatorischer Moat
-    ("MBB", "MBB SE"),                    # Beteiligungsges. Hidden Champions
-    ("ZEG", "Zeal Network SE"),           # Lotterie-Plattform DE, Monopol
-    ("SBSPA", "Sto SE"),                  # Fassadensysteme, Marktführer DE
-    ("PSAN", "ProSiebenSat.1 Media SE"),  # Medien-Plattform
-    ("FNTN", "freenet AG"),               # Mobilfunk-Plattform, Kundenbindung
-    ("PSH", "PSI Software SE"),           # (doppelt, ok)
-    ("PGN", "Paragon GmbH & Co"),         # Automotive Elektronik OEM
-    ("HOT", "Hochtief AG"),               # Bau-Spezialist
-    ("DIC", "DIC Asset AG"),              # Gewerbeimmobilien-Plattform
-    ("PAYX", "Paychex (XETRA)"),          # Payroll-SaaS
-    ("HDD2", "Hella GmbH"),               # Automotive-Tech, OEM-Integration
-    ("KGX", "Kion Group AG"),             # Intralogistik-Software + Hardware
-    ("DBAN", "Deutsche Beteiligungs AG"), # PE für dt. Mittelstand
-    ("FPH", "flatexDEGIRO AG"),          # Broker-Plattform, Lock-in durch Depot
-    ("IOS", "IONOS Group SE"),            # Cloud-Hosting KMU, Switching-Cost-Modell
-    ("RENK", "Renk Group AG"),            # Getriebespezialist Verteidigung/Marine
-    ("MELE", "Medios AG"),               # Pharma-Spezialkompensation, reguliert
-    ("SKB", "Skan Group AG"),            # Pharma-Isolatoren, Marktführer
-    ("YPSN2", "Ypsomed Holding AG"),     # Drug-Delivery Systeme, OEM-Lock-in
-
-    # SDAX + smaller interesting names
-    ("ACX", "Accentro Real Estate AG"), ("ADJ", "adjoe GmbH"),
-    ("AOF2", "Atoss Software pref"), ("CANE", "Canandaigua National"),
-    ("DBO", "Drägerwerk AG"), ("ECV", "Encavis AG"),
-    ("FNBG", "First National Bank"), ("GFTI", "GFT Technologies"),
-    ("HBH", "Hamburger Hafen und Logistik AG"), ("HDD2", "Hella GmbH & Co"),
-    ("IGGD", "IGG Inc (XETRA)"), ("ILM1", "Iliad SA (XETRA)"),
-    ("IPH", "Interparfums (XETRA)"), ("IRWD", "Ironwood Pharma (XETRA)"),
-    ("KBC", "KBC Groep (XETRA)"), ("KNEBV", "Kone Oyj (XETRA)"),
-    ("LEC", "Leclanche SA"), ("LLD", "Lloyd's Banking (XETRA)"),
-    ("MNST", "Monster Beverage (XETRA)"), ("NDX1", "Nordex SE"),
-    ("PGN", "Paragon GmbH & Co"), ("PRIME", "Primecoin"),
-    ("PSI", "PSI Software AG"), ("PTRO", "Petro Welt Technologies AG"),
-    ("PWO", "Progress-Werk Oberkirch AG"), ("RWWE", "RWE Wind Energy"),
-    ("SBO", "Schoeller-Bleckmann Oilfield"), ("SCY", "Scancom PLC"),
-    ("SHEL", "Shell PLC (XETRA)"), ("SKB", "Skan Group AG"),
-    ("TGH", "Triton International (XETRA)"), ("TKA", "Thyssenkrupp AG"),
-    ("UKB", "United Utilities (XETRA)"), ("VBH", "VBH Holding AG"),
-    ("VODI", "Vodafone Group (XETRA)"), ("WIN", "Wincor Nixdorf AG"),
-    ("WUW", "Württembergische Gemeinde-Versicherung"), ("XNT", "Xanten AG"),
-    ("ZEG", "Zeal Network SE"),
+    # ── Hidden Champions (bestätigte Thiel-Relevanz) ─────────────────────────
+    ("ADN1", "Adesso SE"),            # IT-Consulting Branchen-Spezialist
+    ("CLIQ", "CLIQ Digital AG"),      # Digital-Abo Nischenplattform
+    ("DBO", "Drägerwerk AG"),         # Medizin/Sicherheitstechnik, Mission-Critical
+    ("ECV", "Encavis AG"),
+    ("HBH", "Hamburger Hafen und Logistik AG"),
+    ("ILM1", "Iliad SA (XETRA)"),
+    ("KBC", "KBC Groep (XETRA)"),
+    ("KTN", "Kontron AG"),            # Embedded Computing B2B
+    ("NDX1", "Nordex SE"),
+    ("PGN", "Paragon GmbH & Co"),     # Automotive Elektronik OEM
+    ("PSI", "PSI Software AG"),       # Energie/Industrie ERP
+    ("PTRO", "Petro Welt Technologies AG"),
+    ("PWO", "Progress-Werk Oberkirch AG"),
+    ("SBO", "Schoeller-Bleckmann Oilfield"),
+    ("SHEL", "Shell PLC (XETRA)"),
+    ("SKB", "Skan Group AG"),         # Pharma-Isolatoren, Marktführer
+    ("TKA", "Thyssenkrupp AG"),
+    ("VBH", "VBH Holding AG"),
+    ("ZEG", "Zeal Network SE"),       # Lotterie-Plattform DE, Monopol
 ]
 
 SIX_SEEDS = [
