@@ -239,18 +239,46 @@ def build_universe(config: dict, conn) -> list[dict]:
 
 
 def _filter_cohort(companies: list[dict], cohort: dict) -> list[dict]:
-    """Filter companies for a specific cohort."""
-    result = []
+    """
+    Filter companies for a cohort. Drei Modi:
+
+    1. high_conviction: nur manuelle Ticker-Liste, keine SIC-Einschränkung
+    2. broad_watch / sic_codes=[]: alle Unternehmen (nur Market-Cap-Filter)
+    3. normal: SIC-basiert (nur wenn SIC-Daten vorhanden)
+    """
+    cohort_id = cohort.get("id", "")
     sic_codes = set(str(s) for s in cohort.get("sic_codes", []))
-    min_cap = cohort.get("min_market_cap_m", 0)
+    min_cap   = cohort.get("min_market_cap_m", 0)
+    tickers   = set(t.upper() for t in cohort.get("tickers", []))
+
+    result = []
 
     for company in companies:
-        # SIC filter if cohort specifies it
-        if sic_codes and company.get("sic_code") not in sic_codes:
-            # If no SIC data available, include anyway (edgartools will verify)
-            if company.get("sic_code"):
-                continue
+        ticker = company.get("ticker", "").upper()
 
+        # Modus 1: high_conviction — nur explizite Ticker-Liste
+        if cohort_id == "high_conviction":
+            if tickers and ticker not in tickers:
+                continue
+            result.append(company)
+            continue
+
+        # Market-Cap-Filter (wenn Daten vorhanden)
+        cap = company.get("market_cap_m", 0) or 0
+        if cap > 0 and cap < min_cap:
+            continue
+
+        # Modus 2: broad_watch / keine SIC-Codes → alle Unternehmen
+        if not sic_codes:
+            result.append(company)
+            continue
+
+        # Modus 3: SIC-Filter
+        company_sic = company.get("sic_code")
+        if company_sic and company_sic not in sic_codes:
+            continue  # SIC bekannt aber nicht in Liste → ausschließen
+
+        # SIC unbekannt → aufnehmen (edgartools klärt beim Filing-Fetch)
         result.append(company)
 
     return result

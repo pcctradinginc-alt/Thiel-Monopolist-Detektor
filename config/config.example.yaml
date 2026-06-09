@@ -17,57 +17,91 @@ universe:
     max_revenue_m: 10             # Revenue < $10M
     min_consecutive_negative_fcf_years: 3  # UND 3+ Jahre negativer FCF
 
-  # Kohorten — bewusst BREIT gehalten, Lane-Scoring + LLM filtern
-  # Zweistufiges Rotationssystem:
-  #   rotation_tier: "core"     → alle 2 Wochen (800-1.500 Ticker)
-  #   rotation_tier: "extended" → alle 8 Wochen (Rest des Universums)
+  # ── 3-Schichten-Modell ────────────────────────────────────────────────────
+  # Schicht 1 (high_conviction):   Manuell, keine SIC-Einschränkung, wöchentlich
+  # Schicht 2 (moat_prone_sectors): Erweiterte SIC-Liste, alle 2 Wochen
+  # Schicht 3 (broad_watch):        Sehr breit, alle 6 Wochen, kein Alerting
+  #
+  # rotation_tier: "core"     → alle 2 Wochen
+  #                "extended" → alle 8 Wochen
   # Trigger-Bypass: neues Filing oder Score-Sprung → immer Tier 1
 
   cohorts:
-    # ── KERN-UNIVERSE (rotation_tier: core, alle 2 Wochen) ──────────────────
+    # ── SCHICHT 1: High Conviction (manuell, keine SIC-Einschränkung) ────────
+    - id: high_conviction
+      name: "High Conviction Watchlist"
+      sic_codes: []               # bewusst leer = keine SIC-Einschränkung
+      min_market_cap_m: 300
+      rotation_tier: core         # wöchentlich — höchste Priorität
+      alerting_enabled: true
+      tickers:                    # Manuell gepflegte High-Conviction-Liste
+        # Klassische Thiel-Monopolisten außerhalb Software-SIC
+        - "TDG"    # TransDigm — Aerospace-Teile-Monopolist, 100%+ Pricing Power
+        - "MCO"    # Moody's — Rating-Duopol, regulatorischer Moat
+        - "SPGI"   # S&P Global — Daten-Monopolist, Pflichtkonsum
+        - "MSCI"   # MSCI — Index-Monopol, jede Fondsgesellschaft braucht es
+        - "POOL"   # Pool Corp — Vertriebsmonopolist Swimmingpool-Teile
+        - "ENTG"   # Entegris — Semiconductor-Materialien Sole-Source
+        - "FAST"   # Fastenal — Industrial Vending Lock-in
+        - "ODFL"   # Old Dominion Freight — LTL Netzwerkeffekte
+        - "WSO"    # Watsco — HVAC-Vertriebsplattform
+        - "CSGP"   # CoStar — Gewerbeimmobilien-Datenmonopol
+        - "VRSK"   # Verisk Analytics — Versicherungsdaten-Monopol
+        - "ICE"    # Intercontinental Exchange — bereits Alert ausgelöst
+        - "FICO"   # Fair Isaac — bereits Alert ausgelöst
+        - "ISRG"   # Intuitive Surgical — bereits Alert ausgelöst
+
+    # ── SCHICHT 2: Moat-Prone Sektoren (SIC-basiert, alle 2 Wochen) ─────────
+    - id: moat_prone_sectors
+      name: "Moat-Prone Sectors"
+      sic_codes:
+        # Software & Internet (bisheriger Kern)
+        - "7370"  # Computer Programming Services
+        - "7371"  # Custom Computer Programming
+        - "7372"  # Prepackaged Software
+        - "7373"  # Computer Integrated Systems Design
+        - "7374"  # Data Processing Services
+        - "7375"  # Information Retrieval Services
+        - "7376"  # Computer Facilities Management
+        - "7379"  # Computer Systems Design NEC
+        # Daten & Information Services (sehr starke Moats)
+        - "7389"  # Business Services NEC (Moody's, MSCI, S&P Global)
+        - "7323"  # Credit Reporting Services
+        - "6282"  # Investment Advice
+        - "6199"  # Finance Services
+        # Spezialisierte Industrie / Komponenten
+        - "3728"  # Aircraft Parts (TransDigm-ähnlich)
+        - "2819"  # Industrial Chemicals (Entegris-ähnlich)
+        - "3841"  # Surgical Instruments
+        - "3826"  # Laboratory Analytical Instruments
+        - "3825"  # Instruments for Measuring
+        - "3674"  # Semiconductors
+        - "3812"  # Defense Electronics
+        # Distribution mit Netzwerkeffekten / Lock-in
+        - "5047"  # Medical & Hospital Equipment
+        - "5065"  # Electronic Parts & Equipment
+        - "5091"  # Sporting & Recreation Goods (Pool Corp)
+        # Logistik-Plattformen
+        - "4731"  # Freight Transportation Arrangement
+      min_market_cap_m: 200
+      rotation_tier: core         # alle 2 Wochen
+      alerting_enabled: true
+
+    # ── IPOs separat (immer höchste Priorität) ───────────────────────────────
     - id: ipo_recent
       name: "IPOs letzte 36 Monate"
       ipo_months_back: 36
       min_market_cap_m: 100
-      rotation_tier: core         # IPOs immer wöchentlich
+      rotation_tier: core         # wöchentlich
       alerting_enabled: true
 
-    - id: data_analytics
-      name: "Data & Analytics Monopolisten"
-      sic_codes: ["7389", "6199", "6282", "7372"]
-      min_market_cap_m: 500
-      rotation_tier: core         # Klassische Thiel-Monopole — hohe Trefferrate
-      alerting_enabled: true
-
-    - id: tech_software_core
-      name: "Tech & Software (Kern)"
-      sic_codes: ["7372", "7374", "7375"]  # SaaS + Internet Platforms
-      min_market_cap_m: 200
-      rotation_tier: core
-      alerting_enabled: true
-
-    # ── ERWEITERTES UNIVERSE (rotation_tier: extended, alle 8 Wochen) ────────
-    - id: tech_software_extended
-      name: "Tech & Software (Erweitert)"
-      sic_codes: ["7370", "7371", "7373", "7376", "7377", "7378", "7379"]
-      min_market_cap_m: 200
-      rotation_tier: extended     # IT-Services, Peripherie — seltener Treffer
-      alerting_enabled: true
-
-    - id: specialty_industrial
-      name: "Specialty Industrials & Hidden Champions"
-      sic_codes: ["3728", "3679", "3674", "3672", "3669", "3577", "3571",
-                  "2819", "2860", "3841", "3826", "3825", "3812"]
-      min_market_cap_m: 300
-      rotation_tier: extended
-      alerting_enabled: true
-
-    - id: healthcare_tech
-      name: "Healthcare Technology"
-      sic_codes: ["7372", "8099", "5047", "8011"]
-      min_market_cap_m: 200
-      rotation_tier: extended
-      alerting_enabled: true
+    # ── SCHICHT 3: Broad Watch (sehr breit, alle 6-8 Wochen) ─────────────────
+    - id: broad_watch
+      name: "Broad Watchlist"
+      sic_codes: []               # keine SIC-Einschränkung = alle US-Aktien
+      min_market_cap_m: 150       # nur Mindest-Cap als Qualitätsfilter
+      rotation_tier: extended     # alle 8 Wochen
+      alerting_enabled: false     # erstmal nur Baseline — nach 2 Runs aktivieren
 
 eu_universe:
   enabled: true

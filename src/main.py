@@ -279,11 +279,12 @@ def _prioritize_universe(universe: list[dict], conn, max_calls: int,
         last_eval_str    = info.get("last_evaluated")
         last_filing_str  = info.get("last_filing_date")
         score     = info.get("monopoly_score", 0)
-        is_ipo    = cohort_id in ("eu_ipo", "ipo_recent") or \
-                    company.get("source") == "ipo"
+        is_ipo           = cohort_id in ("eu_ipo", "ipo_recent") or \
+                           company.get("source") == "ipo"
+        is_high_conviction = cohort_id == "high_conviction"
 
-        # Bucket 1: Immer dabei
-        if is_ipo or not last_eval_str:
+        # Bucket 1: Immer dabei — IPOs, nie analysiert, high_conviction
+        if is_ipo or is_high_conviction or not last_eval_str:
             always.append(company)
             continue
 
