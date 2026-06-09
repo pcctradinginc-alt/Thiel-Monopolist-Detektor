@@ -41,16 +41,16 @@ universe:
 eu_universe:
   enabled: true
   exchanges:
-    - xetra       # Deutschland (.DE)
-    - six         # Schweiz (.SW)
-    - euronext_nl # Niederlande (.AS)
-    - euronext_fr # Frankreich (.PA)
-    - nasdaq_se   # Schweden (.ST)
-    - nasdaq_fi   # Finnland (.HE)
-    - nasdaq_dk   # Dänemark (.CO)
-    - oslo        # Norwegen (.OL)
-    - euronext_be # Belgien (.BR)
-    - wien        # Österreich (.VI)
+    - xetra   # Deutschland (.DE)
+    - six     # Schweiz (.SW)
+    - aex     # Niederlande (.AS)
+    - paris   # Frankreich (.PA)
+    - omxs    # Schweden (.ST)
+    - omxh    # Finnland (.HE)
+    - omxc    # Dänemark (.CO)
+    - ose     # Norwegen (.OL)
+    - bru     # Belgien (.BR)
+    - vienna  # Österreich (.VI)
   min_market_cap_m: 200
   alerting_enabled: true
 
