@@ -531,6 +531,11 @@ def process_alerts(
         outcome["dry_run"] = True
         return outcome
 
+    # Signal mit Marktdaten speichern (vor Email/Issue — auch wenn die fehlschlagen)
+    evaluation_id = analysis_result.get("evaluation_id")
+    signal_id = _save_signal(ticker, assessment, previous_status, conn, evaluation_id)
+    outcome["signal_id"] = signal_id
+
     # Create GitHub Issue first (so we have the issue number for email buttons)
     issue_number = None
     if config.get("alerts", {}).get("create_github_issues", True):
@@ -543,3 +548,71 @@ def process_alerts(
     )
 
     return outcome
+
+
+def _save_signal(ticker: str, assessment: dict, previous_status: Optional[dict],
+                 conn, evaluation_id: int = None) -> Optional[int]:
+    """
+    Speichert ein Alert-Signal mit Marktdaten (price_at_signal via yfinance).
+    Gibt signal_id zurück oder None bei Fehler.
+    """
+    from datetime import datetime, timezone
+    import json
+
+    scores      = assessment.get("scores", {})
+    alert_type  = assessment.get("alert_type")
+    primary_lane = None
+    # primary_lane aus LLM-Assessment extrahieren wenn vorhanden
+    criteria = assessment.get("criteria", {})
+    if criteria:
+        # Höchst-scorende Lane als primary_lane
+        try:
+            primary_lane = max(criteria, key=lambda k: criteria[k].get("score", 0))
+        except Exception:
+            pass
+
+    # Score-Delta gegenüber letztem Signal
+    score_delta = None
+    if previous_status and previous_status.get("monopoly_score"):
+        score_delta = (scores.get("monopoly_score") or 0) - previous_status["monopoly_score"]
+
+    # Marktdaten via yfinance (1 Call, fail-safe)
+    price, market_cap_m, avg_volume = None, None, None
+    try:
+        import yfinance as yf
+        info = yf.Ticker(ticker).fast_info
+        price       = getattr(info, "last_price", None)
+        market_cap  = getattr(info, "market_cap", None)
+        market_cap_m = round(market_cap / 1_000_000, 1) if market_cap else None
+        avg_volume   = getattr(info, "three_month_average_volume", None)
+    except Exception as e:
+        logger.debug(f"{ticker}: price fetch for signal failed: {e}")
+
+    try:
+        cursor = conn.execute("""
+            INSERT INTO signals
+            (ticker, signal_date, monopoly_score, confidence_score, data_quality_score,
+             primary_lane, alert_type, score_delta,
+             price_at_signal, market_cap_m, avg_volume_30d,
+             decision_status, evaluation_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'WATCH', ?)
+        """, (
+            ticker,
+            datetime.now(timezone.utc).isoformat(),
+            scores.get("monopoly_score"),
+            scores.get("confidence_score"),
+            scores.get("data_quality_score"),
+            primary_lane,
+            alert_type,
+            score_delta,
+            price,
+            market_cap_m,
+            avg_volume,
+            evaluation_id,
+        ))
+        conn.commit()
+        logger.info(f"{ticker}: Signal gespeichert (price={price}, id={cursor.lastrowid})")
+        return cursor.lastrowid
+    except Exception as e:
+        logger.warning(f"{ticker}: Signal-Speicherung fehlgeschlagen: {e}")
+        return None

@@ -190,12 +190,76 @@ CREATE TABLE IF NOT EXISTS filing_snapshots (
 -- Wird beim ersten Start mit neuer DB automatisch gesetzt.
 
 -- Indexes
+-- Signals: jedes Alert-Event mit Marktdaten zum Zeitpunkt des Signals.
+-- Zweck: saubere Grundlage für späteres Backtesting (ab ~20+ Signalen sinnvoll).
+-- Manuell befüllt via decision_status + human_reason.
+CREATE TABLE IF NOT EXISTS signals (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ticker TEXT NOT NULL,
+    signal_date TEXT NOT NULL,          -- ISO8601, UTC
+
+    -- Scores zum Signalzeitpunkt (regelbasiert, nicht LLM)
+    monopoly_score INTEGER,
+    confidence_score INTEGER,
+    data_quality_score INTEGER,
+    primary_lane TEXT,                  -- z.B. "hidden_wedge"
+    alert_type TEXT,
+    score_delta INTEGER,                -- Differenz zum letzten Signal (NULL = erstes Signal)
+
+    -- Marktdaten zum Signalzeitpunkt (yfinance-Snapshot)
+    price_at_signal REAL,
+    market_cap_m REAL,
+    avg_volume_30d REAL,
+
+    -- Manuelle Entscheidung (nie automatisch)
+    decision_status TEXT CHECK(decision_status IN
+        ('WATCH', 'CANDIDATE', 'BOUGHT', 'REJECTED', 'CLOSED')) DEFAULT 'WATCH',
+    human_reason TEXT,                  -- Freitext: warum BOUGHT/REJECTED
+
+    -- Referenz zur Evaluation die das Signal ausgelöst hat
+    evaluation_id INTEGER REFERENCES evaluations(id),
+
+    FOREIGN KEY (ticker) REFERENCES companies(ticker)
+);
+
+-- Trades: manuelles Journal. Kein Broker-Anschluss, keine Automatisierung.
+-- Zweck: Thesis dokumentieren, P&L verfolgen, Post-Mortem lernen.
+CREATE TABLE IF NOT EXISTS trades (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ticker TEXT NOT NULL,
+    signal_id INTEGER REFERENCES signals(id),
+
+    -- Entry
+    entry_date TEXT NOT NULL,
+    entry_price REAL NOT NULL,
+    position_size_pct REAL,             -- % des Portfolios
+    stop_price REAL,                    -- initialer Stop-Loss
+    thesis TEXT,                        -- kurze Begründung
+
+    -- Exit (NULL solange offen)
+    exit_date TEXT,
+    exit_price REAL,
+    exit_reason TEXT,                   -- z.B. "stop hit", "thesis invalidated", "target reached"
+    post_mortem TEXT,                   -- was hat man gelernt
+
+    -- Performance (berechnet beim Eintragen des Exits)
+    pnl_pct REAL,
+    max_drawdown_pct REAL,
+    max_gain_pct REAL,
+
+    FOREIGN KEY (ticker) REFERENCES companies(ticker)
+);
+
+-- Indexes
 CREATE INDEX IF NOT EXISTS idx_evaluations_ticker ON evaluations(ticker);
 CREATE INDEX IF NOT EXISTS idx_evaluations_run ON evaluations(run_id);
 CREATE INDEX IF NOT EXISTS idx_evaluations_status ON evaluations(status);
 CREATE INDEX IF NOT EXISTS idx_evaluations_monopoly_score ON evaluations(monopoly_score);
 CREATE INDEX IF NOT EXISTS idx_feedback_ticker ON human_feedback(ticker);
 CREATE INDEX IF NOT EXISTS idx_feedback_verdict ON human_feedback(verdict);
+CREATE INDEX IF NOT EXISTS idx_signals_ticker ON signals(ticker);
+CREATE INDEX IF NOT EXISTS idx_signals_date ON signals(signal_date);
+CREATE INDEX IF NOT EXISTS idx_signals_status ON signals(decision_status);
 """
 
 

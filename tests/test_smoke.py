@@ -291,6 +291,41 @@ def test_filing_snapshot_save():
     print(f"✓ filing_snapshot saved (id={snap_id}, words={row['word_count']})")
 
 
+def test_signals_and_trades_schema():
+    """signals- und trades-Tabellen existieren mit korrekten Spalten."""
+    from db.database import init_db
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+        db_path = f.name
+
+    conn = init_db(db_path)
+
+    # signals-Spalten
+    sig_cols = {r[1] for r in conn.execute("PRAGMA table_info(signals)").fetchall()}
+    for col in ("ticker", "signal_date", "monopoly_score", "price_at_signal",
+                "market_cap_m", "avg_volume_30d", "decision_status", "score_delta"):
+        assert col in sig_cols, f"signals missing column: {col}"
+
+    # trades-Spalten
+    trade_cols = {r[1] for r in conn.execute("PRAGMA table_info(trades)").fetchall()}
+    for col in ("ticker", "entry_date", "entry_price", "thesis",
+                "exit_date", "exit_price", "pnl_pct", "post_mortem"):
+        assert col in trade_cols, f"trades missing column: {col}"
+
+    # decision_status CHECK-Constraint
+    conn.execute("INSERT OR IGNORE INTO companies (ticker, name, first_seen_in_universe, is_active) VALUES ('TST','Test',datetime('now'),1)")
+    conn.execute("INSERT INTO signals (ticker, signal_date, decision_status) VALUES ('TST', datetime('now'), 'WATCH')")
+    try:
+        conn.execute("INSERT INTO signals (ticker, signal_date, decision_status) VALUES ('TST', datetime('now'), 'INVALID')")
+        conn.commit()
+        assert False, "CHECK constraint sollte INVALID ablehnen"
+    except Exception:
+        pass  # erwartet
+
+    conn.close()
+    import os; os.unlink(db_path)
+    print("✓ signals + trades schema korrekt, CHECK constraint aktiv")
+
+
 if __name__ == "__main__":
     print("Running smoke tests...\n")
     test_database_init()
