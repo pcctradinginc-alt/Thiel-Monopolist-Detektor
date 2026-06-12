@@ -338,3 +338,59 @@ if __name__ == "__main__":
     test_alert_policy_centralized()
     test_filing_snapshot_save()
     print("\n✓ All smoke tests passed")
+
+
+def test_consecutive_high_score_runs_first_run_counts():
+    """Erstbewertung mit Score >= 65 zählt als Run 1 (nicht 0)."""
+    from db.database import init_db
+    from main import update_company_status
+    with tempfile.NamedTemporaryFile(suffix=".db") as f:
+        conn = init_db(f.name)
+        conn.execute(
+            "INSERT INTO companies (ticker, name, is_active) VALUES ('TST', 'Test', 1)")
+
+        def analysis(score):
+            return {"assessment": {"scores": {"monopoly_score": score,
+                                              "confidence_score": 70,
+                                              "data_quality_score": 70},
+                                   "status": "PARTIAL", "alert_type": None}}
+
+        # Erster Run mit 70 → consecutive = 1
+        update_company_status(conn, "TST", analysis(70), {})
+        row = conn.execute(
+            "SELECT consecutive_high_score_runs FROM company_status WHERE ticker='TST'"
+        ).fetchone()
+        assert row[0] == 1, f"Erster Run >= 65 muss 1 ergeben, war {row[0]}"
+
+        # Zweiter Run mit 68 → consecutive = 2 (Alert-Bedingung erfüllt)
+        update_company_status(conn, "TST", analysis(68), {})
+        row = conn.execute(
+            "SELECT consecutive_high_score_runs FROM company_status WHERE ticker='TST'"
+        ).fetchone()
+        assert row[0] == 2, f"Zweiter Run >= 65 muss 2 ergeben, war {row[0]}"
+
+        # Einbruch unter 65 → Reset auf 0
+        update_company_status(conn, "TST", analysis(50), {})
+        row = conn.execute(
+            "SELECT consecutive_high_score_runs FROM company_status WHERE ticker='TST'"
+        ).fetchone()
+        assert row[0] == 0, f"Score < 65 muss auf 0 zurücksetzen, war {row[0]}"
+
+
+def test_weekly_report_markdown():
+    """Wochenreport erzeugt Markdown mit US/EU-Kennzeichnung."""
+    from alerts.weekly_report import build_report_markdown
+    candidates = [
+        {"ticker": "FICO", "region": "US", "monopoly_score": 68,
+         "confidence_score": 72, "data_quality_score": 68, "status": "PARTIAL",
+         "consecutive_runs": 1, "alert_type": "HIDDEN_WEDGE_DETECTED",
+         "summary": "Credit-Score-Standard.", "narrow_market": "US-Kreditscoring"},
+        {"ticker": "NEM.DE", "region": "EU", "monopoly_score": 62,
+         "confidence_score": 60, "data_quality_score": 55, "status": "PARTIAL",
+         "consecutive_runs": 0, "alert_type": None,
+         "summary": "Laborsoftware-Nische.", "narrow_market": ""},
+    ]
+    md = build_report_markdown(candidates)
+    assert "FICO" in md and "NEM.DE" in md
+    assert "| US |" in md and "| EU |" in md
+    assert "1 US, 1 EU" in md

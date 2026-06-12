@@ -19,9 +19,10 @@ All outputs are strict JSON — no narrative prose that could mask hallucination
 
 import json
 import logging
+import os
 import time
 from typing import Optional
-from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception
 
 logger = logging.getLogger(__name__)
 
@@ -139,6 +140,12 @@ CRITICAL INSTRUCTION: You MUST provide both evidence AND counter-evidence for ea
 Do NOT construct a narrative. Find the strongest case FOR and the strongest case AGAINST.
 A good counter-evidence section is as important as evidence.
 
+SCORE CALIBRATION — use the full 0-100 range, do NOT cluster in the 55-68 middle:
+- 0-25: commodity business, no moat | 26-45: typical public company (MOST belong here)
+- 46-60: partial moat, substitutes exist | 61-75: dominant narrow market, rare
+- 76-100: textbook Thiel monopoly — exceptional
+If the evidence is generic ("leading provider"), score LOW, not middle.
+
 Return ONLY valid JSON, no other text:
 
 {
@@ -246,10 +253,27 @@ _rate_limiter = RateLimiter()
 
 # ─── LLM Calls ───────────────────────────────────────────────────────────────
 
+def _is_transient_error(exc: BaseException) -> bool:
+    """Nur transiente API-Fehler retrien — Auth-/Konfig-Fehler sofort durchreichen."""
+    if isinstance(exc, json.JSONDecodeError):
+        return True
+    if ANTHROPIC_AVAILABLE:
+        transient = (
+            anthropic.APIConnectionError,
+            anthropic.RateLimitError,
+            anthropic.InternalServerError,
+            anthropic.APITimeoutError,
+        )
+        if isinstance(exc, transient):
+            return True
+    return False
+
+
 @retry(
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=2, min=4, max=60),
-    retry=retry_if_exception_type(Exception)
+    retry=retry_if_exception(_is_transient_error),
+    reraise=True,
 )
 def _call_llm(client, model: str, static_part: str, dynamic_part: str,
               max_tokens: int = 2000) -> dict:
@@ -302,6 +326,10 @@ def analyze_company(
     """
     if not ANTHROPIC_AVAILABLE:
         return {"error": "anthropic not available", "ticker": ticker}
+
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        logger.error("ANTHROPIC_API_KEY ist nicht gesetzt — LLM-Analyse nicht möglich")
+        return {"error": "ANTHROPIC_API_KEY not set", "ticker": ticker}
 
     client = anthropic.Anthropic()
     model_screening = config.get("screening", {}).get("model_screening", "claude-haiku-4-5-20251001")

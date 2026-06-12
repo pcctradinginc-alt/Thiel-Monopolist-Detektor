@@ -48,6 +48,22 @@ Universe (Lanes)
 
 Alert-Schwelle: alle drei Scores > 65 + Bestätigung in ≥ 2 aufeinanderfolgenden Runs
 
+## Wöchentlicher Kaufkandidaten-Report
+
+Unabhängig von Alert-Schwellen nennt das System nach jedem Batch-Lauf die
+**Top 15 Kandidaten** (US + EU) per GitHub Issue (Label `weekly-report`) und
+E-Mail — mit Scores, Status, Kurzthese und engem Markt. Damit liefert jeder
+Wochenlauf konkrete Namen für die menschliche Tiefenanalyse, auch wenn kein
+Kandidat die harten Alert-Schwellen reißt.
+
+## Persistenz
+
+Die SQLite-DB wird nach jedem Lauf als GitHub-Release-Asset `db-latest`
+gesichert und beim nächsten Lauf wiederhergestellt. Nur so funktionieren
+Rotation (2/8-Wochen-Tiers), die ≥2-Runs-Bestätigung und die Alert-Hysterese
+über Wochen hinweg. EU-Kandidaten haben eine feste Quote von 25 % des
+LLM-Call-Budgets pro Lauf.
+
 ## Alert-Typen
 
 ```

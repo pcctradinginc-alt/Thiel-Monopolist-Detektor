@@ -70,6 +70,15 @@ CRITICAL RULES:
 - All scores 0-100. Alert only if monopoly_score > 65.
 - A company with regulatory/certification/compliance moat can score 80+ even without software lock-in.
 
+SCORE CALIBRATION — use the full 0-100 range, do NOT cluster in the 55-68 middle:
+- 0-25: commodity business, many interchangeable competitors, no moat
+- 26-45: typical public company — real competitors, some differentiation, replaceable. MOST companies belong here.
+- 46-60: meaningful moat in part of the business, but substitutes exist
+- 61-75: dominant in a narrow market with high switching costs — rare, must be backed by specific evidence
+- 76-100: textbook Thiel monopoly (no realistic substitute + structural lock-in) — exceptional
+A monopoly_score >= 65 is a claim you must be able to defend with concrete filing evidence.
+If the evidence is generic ("leading provider", "competitive strengths"), score LOW, not middle.
+
 Return ONLY valid JSON matching this exact schema:
 
 {

@@ -157,12 +157,10 @@ def update_company_status(conn, ticker: str, analysis: dict, alert_outcome: dict
 
     monopoly_score = scores.get("monopoly_score", 0)
     consecutive = 0
-    if prev:
-        prev_score = prev["monopoly_score"] or 0
-        if monopoly_score >= 65 and prev_score >= 65:
-            consecutive = (prev["consecutive_high_score_runs"] or 0) + 1
-        else:
-            consecutive = 1 if monopoly_score >= 65 else 0
+    if monopoly_score >= 65:
+        prev_score = (prev["monopoly_score"] if prev else 0) or 0
+        prev_runs = (prev["consecutive_high_score_runs"] if prev else 0) or 0
+        consecutive = prev_runs + 1 if prev_score >= 65 else 1
 
     conn.execute("""
         INSERT OR REPLACE INTO company_status
@@ -333,10 +331,11 @@ def _prioritize_universe(universe: list[dict], conn, max_calls: int,
         "FROM company_status"
     ).fetchall()
     for row in rows:
-        known[row["ticker"]] = {
-            "last_evaluated": row["last_evaluated"],
-            "monopoly_score": row["monopoly_score"] or 0,
-            "last_filing_date": row.get("last_filing_date"),
+        r = dict(row)
+        known[r["ticker"]] = {
+            "last_evaluated": r.get("last_evaluated"),
+            "monopoly_score": r.get("monopoly_score") or 0,
+            "last_filing_date": r.get("last_filing_date"),
         }
 
     now = datetime.now(timezone.utc)
@@ -419,6 +418,52 @@ def _prioritize_universe(universe: list[dict], conn, max_calls: int,
         f"nicht fällig: {len(not_due)} → {len(result)} ausgewählt"
     )
     return result
+
+
+def _collect_batch_candidates(queue: list[dict], budget: int, conn, config: dict,
+                               min_lane_score: float, privileged: set):
+    """
+    Holt Filings für priorisierte Kandidaten, bis das Call-Budget voll ist.
+    Gibt (selected, skipped_empty) zurück; selected = Liste von (ticker, filing_data).
+    """
+    selected = []
+    skipped_empty = 0
+    for company in queue:
+        ticker = company.get("ticker", "")
+        if not ticker:
+            continue
+        if len(selected) >= budget:
+            break
+
+        if company.get("source") == "eu" or company.get("exchange"):
+            filing_data = fetch_eu_filing_data(
+                ticker, company.get("name", ""), company.get("exchange", "xetra"))
+        else:
+            filing_data = fetch_filing_data(ticker, cik=company.get("cik"))
+
+        lane_data = compute_lanes(filing_data, config)
+        lane_score = lane_data.get("total_lane_score", 0)
+
+        biz_words = len((filing_data.get("business_description") or "").split())
+        dq = compute_data_quality_score(filing_data)
+        logger.debug(
+            f"{ticker}: biz_words={biz_words}, dq={dq}, "
+            f"lane={lane_score}, has_10k={filing_data.get('has_10k')}, "
+            f"signals={len(filing_data.get('financial_signals', {}))}"
+        )
+
+        # Leere Daten vor LLM blockieren — außer high_conviction/manual_watchlist
+        is_privileged = ticker in privileged
+        if not is_privileged and dq < 20:
+            logger.info(f"{ticker}: data_quality={dq} < 20, no text — skipped (save API cost)")
+            skipped_empty += 1
+            continue
+
+        if lane_score >= min_lane_score or is_privileged:
+            save_filing_snapshot(conn, ticker, filing_data, lane_data)
+            selected.append((ticker, filing_data))
+
+    return selected, skipped_empty
 
 
 def run_screening(config: dict, conn, run_id: str, dry_run: bool = False,
@@ -591,15 +636,22 @@ def main():
     run_id = str(uuid.uuid4())[:8]
     logger.info(f"Starting run {run_id} | mode={args.mode} | dry_run={args.dry_run}")
 
+    # Fail fast: ohne API-Key sind LLM-Modi sinnlos (klarer als RetryError nach 3 Versuchen)
+    if args.mode in ("full", "batch_submit", "batch_collect") and \
+            not os.environ.get("ANTHROPIC_API_KEY"):
+        logger.error("ANTHROPIC_API_KEY ist nicht gesetzt — Abbruch. "
+                     "Lokal: export ANTHROPIC_API_KEY=... | CI: GitHub Secret prüfen.")
+        sys.exit(1)
+
     if args.mode == "batch_submit":
         # Build universe, filter, collect filing data, submit as one batch
         logger.info("Building universe for batch submission...")
-        universe = build_universe(config, conn)
+        us_universe = build_universe(config, conn)
+        eu_universe = []
         if config.get("eu_universe", {}).get("enabled"):
             eu_candidates = build_eu_universe(config, conn)
             if eu_candidates:
-                eu_passed, _ = batch_prefilter(eu_candidates, exchange_suffix="")
-                universe = universe + eu_passed
+                eu_universe, _ = batch_prefilter(eu_candidates, exchange_suffix="")
 
         screening_cfg = config.get("screening", {})
         min_lane_score = screening_cfg.get("min_score_for_llm_call", 40)
@@ -609,42 +661,29 @@ def main():
         # high_conviction Ticker immer einschließen (ignorieren leere-Daten-Filter)
         from universe.universe_builder import _get_auto_promoted
         high_conviction = _get_auto_promoted(conn, config)
+        privileged = set(high_conviction) | set(manual_watchlist)
 
-        companies_with_filings = []
-        skipped_empty = 0
-        for company in universe:
-            ticker = company.get("ticker", "")
-            if not ticker or len(companies_with_filings) >= max_calls:
-                break
-            if company.get("source") == "eu" or company.get("exchange"):
-                filing_data = fetch_eu_filing_data(ticker, company.get("name", ""), company.get("exchange", "xetra"))
-            else:
-                filing_data = fetch_filing_data(ticker, cik=company.get("cik"))
+        # EU-Quote: fester Anteil des Call-Budgets. Ohne Quote stehen EU-Titel
+        # hinter 7000+ US-Titeln an und erreichen das Budget nie (0 EU-
+        # Evaluationen in allen bisherigen Runs). Unbenutzte EU-Slots gehen an US.
+        eu_quota = min(int(max_calls * 0.25), len(eu_universe)) if eu_universe else 0
 
-            lane_data = compute_lanes(filing_data, config)
-            lane_score = lane_data.get("total_lane_score", 0)
+        # Rotation auf beide Pools anwenden (3x Budget als Puffer, weil
+        # dq-/Lane-Filter einen Teil der Queue verwerfen)
+        eu_queue = _prioritize_universe(eu_universe, conn, eu_quota * 3, config) if eu_quota else []
+        us_queue = _prioritize_universe(us_universe, conn, (max_calls - eu_quota) * 3, config)
 
-            # Fix 6: Logging für Datenqualität
-            biz_words = len((filing_data.get("business_description") or "").split())
-            dq = compute_data_quality_score(filing_data)
-            logger.debug(
-                f"{ticker}: biz_words={biz_words}, dq={dq}, "
-                f"lane={lane_score}, has_10k={filing_data.get('has_10k')}, "
-                f"signals={len(filing_data.get('financial_signals', {}))}"
-            )
+        eu_selected, eu_skipped = _collect_batch_candidates(
+            eu_queue, eu_quota, conn, config, min_lane_score, privileged)
+        us_selected, us_skipped = _collect_batch_candidates(
+            us_queue, max_calls - len(eu_selected), conn, config, min_lane_score, privileged)
+        companies_with_filings = eu_selected + us_selected
+        skipped_empty = eu_skipped + us_skipped
 
-            # Fix 1: Leere Daten vor LLM blockieren
-            # Ausnahme: high_conviction und manual_watchlist immer einschließen
-            is_privileged = ticker in high_conviction or ticker in manual_watchlist
-            if not is_privileged and dq < 20:
-                logger.info(f"{ticker}: data_quality={dq} < 20, no text — skipped (save API cost)")
-                skipped_empty += 1
-                continue
-
-            if lane_score >= min_lane_score or is_privileged:
-                save_filing_snapshot(conn, ticker, filing_data, lane_data)
-                companies_with_filings.append((ticker, filing_data))
-
+        logger.info(
+            f"Batch selection: {len(us_selected)} US + {len(eu_selected)} EU "
+            f"(EU-Quote: {eu_quota})"
+        )
         if skipped_empty:
             logger.info(f"Skipped {skipped_empty} companies with empty data (dq < 20)")
 
@@ -670,6 +709,11 @@ def main():
         else:
             result = collect_batch(batch_id, conn, config, dry_run=args.dry_run)
             logger.info(f"Batch collect result: {result}")
+            # Wochenreport: Top-Kandidaten IMMER nennen, nicht nur bei Alerts
+            if result.get("complete"):
+                from alerts.weekly_report import post_weekly_report
+                report_outcome = post_weekly_report(conn, config, dry_run=args.dry_run)
+                logger.info(f"Weekly report: {report_outcome}")
 
     elif args.mode == "feedback":
         count = process_feedback(conn, config)

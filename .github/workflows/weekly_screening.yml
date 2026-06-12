@@ -24,6 +24,8 @@ jobs:
   batch-submit:
     name: Submit Batch (Sunday)
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     if: |
       github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'batch_submit' ||
       github.event_name == 'schedule'
@@ -37,6 +39,19 @@ jobs:
 
       - name: Install dependencies
         run: pip install -r requirements.txt
+
+      # KRITISCH: Ohne diese DB startet jeder Lauf bei Null — Rotation,
+      # consecutive_high_score_runs und Alert-Hysterese brauchen die Historie.
+      - name: Restore DB from release (history)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p data
+          if gh release download db-latest --pattern thiel_detector.db --dir data --repo ${{ github.repository }}; then
+            echo "DB aus Release db-latest wiederhergestellt"
+          else
+            echo "Kein db-latest Release gefunden — starte mit leerer DB (erster Lauf)"
+          fi
 
       - name: Submit batch
         env:
@@ -79,7 +94,7 @@ jobs:
     needs: batch-submit
     permissions:
       issues: write
-      contents: read
+      contents: write   # für Release-Upload der DB (db-latest)
     if: |
       always() && (
         (github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'batch_collect') ||
@@ -163,6 +178,25 @@ jobs:
             data/batch_id.txt
           retention-days: 30
           overwrite: true
+
+      # Dauerhafte Persistenz: Release-Assets verfallen nicht (Artifacts schon).
+      # Der nächste batch-submit lädt diese DB als Ausgangspunkt.
+      - name: Persist DB to release
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ ! -f data/thiel_detector.db ]; then
+            echo "Keine DB vorhanden — überspringe Release-Upload"
+            exit 0
+          fi
+          if ! gh release view db-latest --repo ${{ github.repository }} >/dev/null 2>&1; then
+            gh release create db-latest --title "DB Snapshot (auto)" \
+              --notes "Automatisch aktualisierte SQLite-DB des Thiel Detectors. Wird von jedem Wochenlauf gelesen und überschrieben." \
+              --repo ${{ github.repository }}
+          fi
+          gh release upload db-latest data/thiel_detector.db --clobber --repo ${{ github.repository }}
+          echo "DB als Release-Asset db-latest gesichert"
 
   # ── Manuell: Status-Übersicht ──
   status:
