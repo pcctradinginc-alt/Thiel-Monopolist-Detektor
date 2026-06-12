@@ -27,8 +27,15 @@ GLEIF_API = "https://api.gleif.org/api/v1/lei-records"
 XBRL_API = "https://filings.xbrl.org/api"
 XBRL_BASE = "https://filings.xbrl.org"
 
-MAX_REPORT_BYTES = 40 * 1024 * 1024   # Größen-Guard für XHTML-Downloads
+MAX_REPORT_BYTES = 15 * 1024 * 1024   # Größen-Guard für XHTML-Downloads
 _HEADERS = {"User-Agent": "ThielDetector research (github.com/pcctradinginc-alt)"}
+
+# Mengenschutz: Die EU-Queue kann ~500 Kandidaten enthalten — ungebremst wären
+# das hunderte GLEIF/xbrl.org-Lookups + potenziell GB an Downloads pro Lauf.
+# Budget pro Prozess; nicht abgedeckte Firmen kommen in späteren Runs dran
+# (Rotation), der Rest fällt auf Wikipedia/yfinance zurück.
+MAX_LOOKUPS_PER_RUN = 60
+_lookups_this_run = 0
 
 # Abschnitts-Anker (DE/EN/FR/IT/ES) — Fenster um den ersten Treffer wird extrahiert
 _SECTION_ANCHORS = {
@@ -124,11 +131,17 @@ def fetch_esef_text(company_name: str, ticker: str = "") -> dict:
     Gibt {business_description, risk_factors, mda, filing_date, error} zurück.
     Best effort: {} -Felder bleiben leer, wenn Firma nicht im Index ist.
     """
+    global _lookups_this_run
     result = {"business_description": "", "risk_factors": "", "mda": "",
               "filing_date": None, "error": None}
     if not company_name:
         result["error"] = "no company name"
         return result
+
+    if _lookups_this_run >= MAX_LOOKUPS_PER_RUN:
+        result["error"] = "ESEF lookup budget exhausted"
+        return result
+    _lookups_this_run += 1
 
     filing = None
     for lei in find_lei(company_name):
@@ -148,7 +161,15 @@ def fetch_esef_text(company_name: str, ticker: str = "") -> dict:
         if size > MAX_REPORT_BYTES:
             result["error"] = f"report too large ({size} bytes)"
             return result
-        raw = resp.content[:MAX_REPORT_BYTES].decode("utf-8", errors="ignore")
+        # Stückweise lesen mit hartem Cap — resp.content würde trotz
+        # stream=True den kompletten Body laden, auch ohne content-length
+        chunks, read = [], 0
+        for chunk in resp.iter_content(chunk_size=1 << 20):
+            chunks.append(chunk)
+            read += len(chunk)
+            if read > MAX_REPORT_BYTES:
+                break
+        raw = b"".join(chunks)[:MAX_REPORT_BYTES].decode("utf-8", errors="ignore")
     except Exception as e:
         result["error"] = f"download failed: {e}"
         return result

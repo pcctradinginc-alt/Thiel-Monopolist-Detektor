@@ -239,7 +239,14 @@ def save_filing_snapshot(conn, ticker: str, filing_data: dict,
         conn.commit()
         if cursor.lastrowid:
             return cursor.lastrowid
-        # Zeile existierte bereits — ID holen
+        # Zeile existierte bereits — fetched_at auffrischen, damit die
+        # Snapshot-Wiederverwendung (reuse_days) nicht dauerhaft abläuft
+        # und unveränderte/leere Filings wieder wöchentlich gefetcht werden
+        conn.execute(
+            "UPDATE filing_snapshots SET fetched_at=? "
+            "WHERE ticker=? AND filing_date=? AND source=?",
+            (now, ticker, filing_date, source))
+        conn.commit()
         row = conn.execute(
             "SELECT id FROM filing_snapshots WHERE ticker=? AND filing_date=? AND source=?",
             (ticker, filing_date, source)
@@ -451,6 +458,8 @@ def _load_snapshot_as_filing(conn, ticker: str, max_age_days: int):
         keywords = json.loads(r.get("keyword_hits") or "{}")
     except Exception:
         signals, keywords = {}, {}
+    lock_in = keywords.get("lock_in", [])
+    camouflage = keywords.get("camouflage", [])
     filing_data = {
         "ticker": ticker,
         "business_description": r.get("business_description") or "",
@@ -459,8 +468,11 @@ def _load_snapshot_as_filing(conn, ticker: str, max_age_days: int):
         "s1_text": r.get("s1_text") or "",
         "filing_date": r.get("filing_date"),
         "financial_signals": signals,
-        "lock_in_keyword_hits": keywords.get("lock_in", []),
-        "camouflage_keyword_hits": keywords.get("camouflage", []),
+        "lock_in_keyword_hits": lock_in,
+        "camouflage_keyword_hits": camouflage,
+        "keyword_count": len(lock_in),
+        # Näherung aus gespeicherten Treffern: Tarnsprache UND Lock-in zugleich
+        "has_contradiction_signal": bool(lock_in and camouflage),
         "has_10k": bool(r.get("has_10k")),
         "has_s1": bool(r.get("has_s1")),
         "has_10q": bool(r.get("has_10q")),
@@ -532,6 +544,10 @@ def _collect_batch_candidates(queue: list[dict], budget: int, conn, config: dict
                 filing_data = fetch_filing_data(ticker, cik=company.get("cik"))
             lane_data = compute_lanes(filing_data, config)
             lane_score = lane_data.get("total_lane_score", 0)
+            # Snapshot IMMER speichern — auch für Verworfene. Sonst werden
+            # nicht selektierte Firmen jede Woche neu gefetcht und die
+            # Snapshot-Wiederverwendung greift nie für die Mehrheit.
+            save_filing_snapshot(conn, ticker, filing_data, lane_data)
 
         biz_words = len((filing_data.get("business_description") or "").split())
         dq = compute_data_quality_score(filing_data)
@@ -552,8 +568,6 @@ def _collect_batch_candidates(queue: list[dict], budget: int, conn, config: dict
         gate = min_lane_score if prev else min(min_lane_score, baseline_gate)
 
         if lane_score >= gate or is_privileged:
-            if not filing_data.get("_from_snapshot"):
-                save_filing_snapshot(conn, ticker, filing_data, lane_data)
             selected.append((ticker, filing_data))
 
     if skipped_low or reused_snapshots:
@@ -748,9 +762,7 @@ def main():
         us_universe = build_universe(config, conn)
         eu_universe = []
         if config.get("eu_universe", {}).get("enabled"):
-            eu_candidates = build_eu_universe(config, conn)
-            if eu_candidates:
-                eu_universe, _ = batch_prefilter(eu_candidates, exchange_suffix="")
+            eu_universe = build_eu_universe(config, conn)
 
         screening_cfg = config.get("screening", {})
         min_lane_score = screening_cfg.get("min_score_for_llm_call", 40)
@@ -771,6 +783,14 @@ def main():
         # dq-/Lane-Filter einen Teil der Queue verwerfen)
         eu_queue = _prioritize_universe(eu_universe, conn, eu_quota * 3, config) if eu_quota else []
         us_queue = _prioritize_universe(us_universe, conn, (max_calls - eu_quota) * 3, config)
+
+        # Zombie-Prefilter NACH der Rotation, nur auf die Queue (~500 Titel)
+        # statt aufs ganze EODHD-Universe (~3.500) — sonst frisst der Prefilter
+        # allein 1-2h yfinance-Calls pro Woche
+        if eu_queue:
+            eu_queue, eu_rejected = batch_prefilter(eu_queue, exchange_suffix="")
+            logger.info(f"EU-Prefilter (Queue): {len(eu_queue)} passed, "
+                        f"{len(eu_rejected)} rejected")
 
         status_map = {
             r["ticker"]: dict(r) for r in conn.execute(
