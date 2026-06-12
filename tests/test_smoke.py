@@ -429,3 +429,69 @@ def test_classify_entry():
     cls, _ = classify_entry(68, 2, drawdown_pct=None, ps_ratio=None,
                             revenue_growth_pct=None)
     assert cls == "QUALITAET_TEUER"
+
+
+def test_snapshot_reuse_roundtrip():
+    """Filing-Snapshot speichern und als filing_data wiederverwenden (ohne Netz)."""
+    from db.database import init_db
+    from main import save_filing_snapshot, _load_snapshot_as_filing
+    with tempfile.NamedTemporaryFile(suffix=".db") as f:
+        conn = init_db(f.name)
+        conn.execute("INSERT INTO companies (ticker, name, is_active) VALUES ('TST', 'Test', 1)")
+        filing_data = {
+            "business_description": "word " * 300,
+            "risk_factors": "risk " * 120,
+            "mda": "mda " * 120,
+            "filing_date": "2026-01-15",
+            "financial_signals": {"gross_margin_current": 80.0},
+            "lock_in_keyword_hits": ["switching costs"],
+            "camouflage_keyword_hits": [],
+            "has_10k": True,
+        }
+        save_filing_snapshot(conn, "TST", filing_data, {"total_lane_score": 60, "lanes": {}})
+
+        loaded = _load_snapshot_as_filing(conn, "TST", max_age_days=45)
+        assert loaded is not None
+        fd, lane = loaded
+        assert lane == 60
+        assert fd["_from_snapshot"] is True
+        assert fd["filing_date"] == "2026-01-15"
+        assert fd["financial_signals"]["gross_margin_current"] == 80.0
+        assert fd["lock_in_keyword_hits"] == ["switching costs"]
+
+        # Zu alter Snapshot wird nicht wiederverwendet
+        assert _load_snapshot_as_filing(conn, "TST", max_age_days=0) is None
+
+
+def test_batch_candidate_gates():
+    """Baseline-Gate für nie Evaluierte + Low-Score-Skip (ohne Netz via Snapshot)."""
+    from datetime import datetime, timezone
+    from db.database import init_db
+    from main import save_filing_snapshot, _collect_batch_candidates
+    with tempfile.NamedTemporaryFile(suffix=".db") as f:
+        conn = init_db(f.name)
+        conn.execute("INSERT INTO companies (ticker, name, is_active) VALUES ('TST', 'Test', 1)")
+        filing_data = {
+            "business_description": "word " * 300,
+            "filing_date": "2026-01-15",
+            "financial_signals": {"gross_margin_current": 80.0},
+            "has_10k": True,
+        }
+        # Snapshot mit Lane-Score 30: unter Standard-Gate 55, über Baseline 25
+        save_filing_snapshot(conn, "TST", filing_data, {"total_lane_score": 30, "lanes": {}})
+        config = {"screening": {}}
+        queue = [{"ticker": "TST"}]
+
+        # Nie evaluiert → Baseline-Gate greift → ausgewählt (Recall!)
+        sel, _ = _collect_batch_candidates(queue, 10, conn, config, 55, set())
+        assert len(sel) == 1, "Nie evaluierte Firma muss Baseline-Gate passieren"
+
+        # Bereits evaluiert mit niedrigem Score, Bewertung frisch → übersprungen (Kosten)
+        status_map = {"TST": {
+            "monopoly_score": 30,
+            "last_evaluated": datetime.now(timezone.utc).isoformat(),
+            "last_filing_date": "2026-01-15",
+        }}
+        sel, _ = _collect_batch_candidates(queue, 10, conn, config, 55, set(),
+                                           status_map=status_map)
+        assert len(sel) == 0, "Frisch bewerteter Low-Scorer muss übersprungen werden"

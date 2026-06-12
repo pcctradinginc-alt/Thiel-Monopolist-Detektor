@@ -242,7 +242,111 @@ BENELUX_EXTRA_SEEDS = [
     ("PICANOL", "Picanol NV"),     # Weaving machines, global leader
 ]
 
+# London Stock Exchange — UK-Filing-Texte via Companies House bereits unterstützt
+LSE_SEEDS = [
+    # Daten-/Informations-Monopole
+    ("REL", "RELX PLC"),               # Wissenschafts-/Rechts-Datenbanken
+    ("LSEG", "London Stock Exchange Group PLC"),
+    ("EXPN", "Experian PLC"),          # Credit Bureau Oligopol
+    ("ITRK", "Intertek Group PLC"),    # Testing/Inspection/Certification
+    ("YOU", "YouGov PLC"),
+    # Marktplatz-Monopole
+    ("AUTO", "Auto Trader Group PLC"), # De-facto-Monopol Gebrauchtwagen UK
+    ("RMV", "Rightmove PLC"),          # De-facto-Monopol Immobilienportale UK
+    ("ATG", "Auction Technology Group PLC"),
+    ("MONY", "MONY Group PLC"),
+    ("CKN", "Clarkson PLC"),           # Weltgrößter Shipbroker
+    # Software / Vertical SaaS
+    ("SGE", "Sage Group PLC"),
+    ("KNOS", "Kainos Group PLC"),
+    ("GBG", "GB Group PLC"),           # Identity Verification
+    ("ALFA", "Alfa Financial Software Holdings PLC"),
+    ("CRW", "Craneware PLC"),          # US-Krankenhaus-Billing-Software
+    ("RWS", "RWS Holdings PLC"),       # Patent-Übersetzungen
+    ("BYIT", "Bytes Technology Group PLC"),
+    ("CCC", "Computacenter PLC"),
+    ("WISE", "Wise PLC"),
+    # Spezialisierte Industrie / Hidden Champions
+    ("HLMA", "Halma PLC"),             # Safety-Nischen-Serienkäufer
+    ("SPX", "Spirax Group PLC"),       # Dampftechnik Weltmarktführer
+    ("RSW", "Renishaw PLC"),           # Messtechnik
+    ("ROR", "Rotork PLC"),             # Stellantriebe
+    ("SXS", "Spectris PLC"),
+    ("OXIG", "Oxford Instruments PLC"),
+    ("JDG", "Judges Scientific PLC"),  # Nischen-Instrumente
+    ("DPLM", "Diploma PLC"),           # Nischen-Distribution
+    ("CRDA", "Croda International PLC"),
+    ("WEIR", "Weir Group PLC"),
+    ("SMIN", "Smiths Group PLC"),
+    ("RR", "Rolls-Royce Holdings PLC"),   # Triebwerks-Duopol + Aftermarket-Lock-in
+    ("BA", "BAE Systems PLC"),         # Regulatorischer Moat
+    # Brand-/IP-Monopole
+    ("GAW", "Games Workshop Group PLC"),  # Warhammer-IP-Monopol
+    # Plattform-Lock-in Finanzen
+    ("IHP", "Integrafin Holdings PLC"),   # Transact-Plattform: hohe Wechselkosten
+    ("AJB", "AJ Bell PLC"),
+    ("PAY", "PayPoint PLC"),
+    ("BOKU", "Boku Inc"),              # Carrier-Billing-Netzwerk
+    # Distribution
+    ("BNZL", "Bunzl PLC"),
+    ("HWDN", "Howden Joinery Group PLC"),
+    ("AHT", "Ashtead Group PLC"),
+    ("FOUR", "4imprint Group PLC"),
+]
+
+# Borsa Italiana — Hidden Champions + regulatorische Monopole
+MILAN_SEEDS = [
+    ("RACE", "Ferrari NV"),            # Brand + Pricing Power
+    ("MONC", "Moncler SpA"),
+    ("BC", "Brunello Cucinelli SpA"),
+    ("AMP", "Amplifon SpA"),           # Hörgeräte-Retail Weltmarktführer
+    ("DIA", "DiaSorin SpA"),           # Diagnostik-Nischen
+    ("REC", "Recordati SpA"),          # Orphan Drugs
+    ("IP", "Interpump Group SpA"),     # Hochdruckpumpen Weltmarktführer
+    ("TGYM", "Technogym SpA"),
+    ("ENAV", "ENAV SpA"),              # Flugsicherung — staatliches Monopol
+    ("INW", "Infrastrutture Wireless Italiane SpA"),  # Funkturm-Quasi-Monopol
+    ("MARR", "MARR SpA"),              # Foodservice-Distribution Marktführer
+    ("WIIT", "WIIT SpA"),              # Critical-Cloud-Hosting-Nische
+    ("REY", "Reply SpA"),
+    ("CPR", "Davide Campari-Milano NV"),
+    ("DAL", "Datalogic SpA"),
+]
+
+# Bolsa de Madrid — Infrastruktur-Monopole + Hidden Champions
+MADRID_SEEDS = [
+    ("AMS", "Amadeus IT Group SA"),    # GDS-Oligopol, massiver Lock-in
+    ("AENA", "Aena SME SA"),           # Flughafen-Monopol
+    ("CLNX", "Cellnex Telecom SA"),    # Funktürme
+    ("RED", "Redeia Corporacion SA"),  # Stromnetz-Monopol
+    ("ENG", "Enagas SA"),              # Gasnetz-Monopol
+    ("LOG", "Logista Holdings SA"),    # Distributions-Monopol Iberia
+    ("VIS", "Viscofan SA"),            # Wursthüllen Weltmarktführer
+    ("FDR", "Fluidra SA"),             # Pool-Equipment
+    ("GRF", "Grifols SA"),             # Plasma-Oligopol
+    ("ITX", "Inditex SA"),
+    ("IDR", "Indra Sistemas SA"),
+]
+
 EXCHANGES = {
+    "lse": {
+        "suffix": ".L",
+        "seeds": LSE_SEEDS,
+        "min_market_cap_m": 50,
+        "country": "GB",
+    },
+    "milan": {
+        "suffix": ".MI",
+        "seeds": MILAN_SEEDS,
+        "min_market_cap_m": 50,
+        "country": "IT",
+    },
+    "madrid": {
+        "suffix": ".MC",
+        "seeds": MADRID_SEEDS,
+        "min_market_cap_m": 50,
+        "country": "ES",
+    },
     "xetra": {
         "suffix": ".DE",
         "seeds": XETRA_SEEDS,

@@ -80,6 +80,21 @@ Rotation (2/8-Wochen-Tiers), die ≥2-Runs-Bestätigung und die Alert-Hysterese
 über Wochen hinweg. EU-Kandidaten haben eine feste Quote von 25 % des
 LLM-Call-Budgets pro Lauf.
 
+**Run-Plan (getrennte Crons statt 6h-Sleep — GitHub-Jobs haben ein 6h-Limit):**
+- So 06:00 UTC: `batch_submit` (Universe, Filings, Batch einreichen)
+- So 16:00 / So 20:00 / Mo 06:00 UTC: `batch_collect` (idempotent — Backups
+  sind no-ops, sobald der Batch eingesammelt ist)
+
+**Recall-Garantien:** Nie evaluierte Firmen passieren mit relaxtem Lane-Gate
+(`baseline_lane_score: 25`) — das Keyword-Gate kann einen Monopolisten ohne
+Plattform-Vokabular nicht dauerhaft aussperren. Neue Filings triggern
+Re-Analyse (Rotation-Trigger via `last_filing_date`).
+
+**Kosten-Optimierung:** Low-Scorer (< 40) mit Bewertung jünger als 120 Tage
+werden übersprungen; Filing-Snapshots jünger als 45 Tage werden aus der DB
+wiederverwendet statt EDGAR neu zu parsen (10-Ks sind jährlich). Das freie
+Budget fließt in noch nie gesehene Namen.
+
 ## Alert-Typen
 
 ```

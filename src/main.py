@@ -19,7 +19,7 @@ import os
 import sys
 import uuid
 import yaml
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 # ── Setup paths ──────────────────────────────────────────────────────────────
@@ -162,12 +162,21 @@ def update_company_status(conn, ticker: str, analysis: dict, alert_outcome: dict
         prev_runs = (prev["consecutive_high_score_runs"] if prev else 0) or 0
         consecutive = prev_runs + 1 if prev_score >= 65 else 1
 
+    # last_filing_date aus dem jüngsten Snapshot — Grundlage für den
+    # Rotation-Trigger "neues Filing seit letzter Analyse"
+    fs = conn.execute(
+        "SELECT filing_date FROM filing_snapshots "
+        "WHERE ticker = ? AND filing_date != 'unknown' "
+        "ORDER BY fetched_at DESC LIMIT 1", (ticker,)
+    ).fetchone()
+    last_filing_date = fs["filing_date"] if fs else None
+
     conn.execute("""
         INSERT OR REPLACE INTO company_status
         (ticker, current_status, monopoly_score, confidence_score, data_quality_score,
          consecutive_high_score_runs, last_alert_type, last_alert_date, last_evaluated,
-         is_alert_eligible)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         is_alert_eligible, last_filing_date)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
         ticker,
         status,
@@ -178,7 +187,8 @@ def update_company_status(conn, ticker: str, analysis: dict, alert_outcome: dict
         alert_type if alert_outcome.get("email_sent") or alert_outcome.get("github_issue") else None,
         now if alert_outcome.get("email_sent") else None,
         now,
-        1 if status in ("STRONG", "PARTIAL") else 0
+        1 if status in ("STRONG", "PARTIAL") else 0,
+        last_filing_date,
     ))
     conn.commit()
 
@@ -420,14 +430,74 @@ def _prioritize_universe(universe: list[dict], conn, max_calls: int,
     return result
 
 
+def _load_snapshot_as_filing(conn, ticker: str, max_age_days: int):
+    """
+    Frischen Filing-Snapshot aus der DB als filing_data wiederverwenden,
+    statt EDGAR/yfinance neu abzufragen. 10-Ks sind jährlich — ein Snapshot
+    unter ~45 Tagen ist praktisch immer aktuell. Spart Stunden Fetch-Zeit
+    pro Run. Gibt (filing_data, lane_score) oder None zurück.
+    """
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=max_age_days)).isoformat()
+    row = conn.execute("""
+        SELECT * FROM filing_snapshots
+        WHERE ticker = ? AND fetched_at >= ?
+        ORDER BY fetched_at DESC LIMIT 1
+    """, (ticker, cutoff)).fetchone()
+    if not row:
+        return None
+    r = dict(row)
+    try:
+        signals = json.loads(r.get("financial_signals") or "{}")
+        keywords = json.loads(r.get("keyword_hits") or "{}")
+    except Exception:
+        signals, keywords = {}, {}
+    filing_data = {
+        "ticker": ticker,
+        "business_description": r.get("business_description") or "",
+        "risk_factors": r.get("risk_factors") or "",
+        "mda": r.get("mda") or "",
+        "s1_text": r.get("s1_text") or "",
+        "filing_date": r.get("filing_date"),
+        "financial_signals": signals,
+        "lock_in_keyword_hits": keywords.get("lock_in", []),
+        "camouflage_keyword_hits": keywords.get("camouflage", []),
+        "has_10k": bool(r.get("has_10k")),
+        "has_s1": bool(r.get("has_s1")),
+        "has_10q": bool(r.get("has_10q")),
+        "source_enriched": r.get("source"),
+        "_from_snapshot": True,
+    }
+    return filing_data, (r.get("lane_score") or 0)
+
+
 def _collect_batch_candidates(queue: list[dict], budget: int, conn, config: dict,
-                               min_lane_score: float, privileged: set):
+                               min_lane_score: float, privileged: set,
+                               status_map: dict = None):
     """
     Holt Filings für priorisierte Kandidaten, bis das Call-Budget voll ist.
     Gibt (selected, skipped_empty) zurück; selected = Liste von (ticker, filing_data).
+
+    Recall + Kosten:
+      - Nie evaluierte Firmen passieren mit relaxtem Lane-Gate (baseline_lane_score)
+        — das Keyword-Gate darf einen Monopolisten nicht dauerhaft aussperren.
+      - Low-Scorer (< low_score_threshold) mit junger Bewertung werden übersprungen
+        — das Budget fließt in noch nie gesehene Namen.
+      - Frische Snapshots (< snapshot_reuse_days) ersetzen den Netz-Fetch.
     """
+    status_map = status_map or {}
+    screening_cfg = config.get("screening", {})
+    baseline_gate = screening_cfg.get("baseline_lane_score", 25)
+    low_score = screening_cfg.get("low_score_threshold", 40)
+    low_score_days = screening_cfg.get("low_score_reeval_days", 120)
+    reuse_days = screening_cfg.get("snapshot_reuse_days", 45)
+    reeval_cutoff = (datetime.now(timezone.utc)
+                     - timedelta(days=low_score_days)).isoformat()
+
     selected = []
     skipped_empty = 0
+    skipped_low = 0
+    reused_snapshots = 0
+
     for company in queue:
         ticker = company.get("ticker", "")
         if not ticker:
@@ -435,14 +505,33 @@ def _collect_batch_candidates(queue: list[dict], budget: int, conn, config: dict
         if len(selected) >= budget:
             break
 
-        if company.get("source") == "eu" or company.get("exchange"):
-            filing_data = fetch_eu_filing_data(
-                ticker, company.get("name", ""), company.get("exchange", "xetra"))
-        else:
-            filing_data = fetch_filing_data(ticker, cik=company.get("cik"))
+        is_privileged = ticker in privileged
+        prev = status_map.get(ticker)
 
-        lane_data = compute_lanes(filing_data, config)
-        lane_score = lane_data.get("total_lane_score", 0)
+        # Kosten: Low-Scorer mit junger Bewertung nicht erneut durchs LLM jagen
+        if not is_privileged and prev:
+            prev_score = prev.get("monopoly_score")
+            last_eval = prev.get("last_evaluated") or ""
+            if prev_score is not None and prev_score < low_score \
+                    and last_eval >= reeval_cutoff:
+                skipped_low += 1
+                continue
+
+        # Kosten: frischen Snapshot wiederverwenden statt neu zu fetchen
+        cached = _load_snapshot_as_filing(conn, ticker, reuse_days)
+        if cached:
+            filing_data, lane_score = cached
+            lane_data = {"total_lane_score": lane_score, "lanes": {},
+                         "_cached": True}
+            reused_snapshots += 1
+        else:
+            if company.get("source") == "eu" or company.get("exchange"):
+                filing_data = fetch_eu_filing_data(
+                    ticker, company.get("name", ""), company.get("exchange", "xetra"))
+            else:
+                filing_data = fetch_filing_data(ticker, cik=company.get("cik"))
+            lane_data = compute_lanes(filing_data, config)
+            lane_score = lane_data.get("total_lane_score", 0)
 
         biz_words = len((filing_data.get("business_description") or "").split())
         dq = compute_data_quality_score(filing_data)
@@ -453,16 +542,26 @@ def _collect_batch_candidates(queue: list[dict], budget: int, conn, config: dict
         )
 
         # Leere Daten vor LLM blockieren — außer high_conviction/manual_watchlist
-        is_privileged = ticker in privileged
         if not is_privileged and dq < 20:
             logger.info(f"{ticker}: data_quality={dq} < 20, no text — skipped (save API cost)")
             skipped_empty += 1
             continue
 
-        if lane_score >= min_lane_score or is_privileged:
-            save_filing_snapshot(conn, ticker, filing_data, lane_data)
+        # Recall: nie evaluierte Firmen bekommen das relaxte Baseline-Gate —
+        # ein Monopolist ohne Plattform-Vokabular darf nicht ewig unsichtbar bleiben
+        gate = min_lane_score if prev else min(min_lane_score, baseline_gate)
+
+        if lane_score >= gate or is_privileged:
+            if not filing_data.get("_from_snapshot"):
+                save_filing_snapshot(conn, ticker, filing_data, lane_data)
             selected.append((ticker, filing_data))
 
+    if skipped_low or reused_snapshots:
+        logger.info(
+            f"Budget-Optimierung: {skipped_low} Low-Scorer übersprungen "
+            f"(< {low_score} Punkte, < {low_score_days} Tage alt), "
+            f"{reused_snapshots} Snapshots wiederverwendet (< {reuse_days} Tage)"
+        )
     return selected, skipped_empty
 
 
@@ -673,10 +772,18 @@ def main():
         eu_queue = _prioritize_universe(eu_universe, conn, eu_quota * 3, config) if eu_quota else []
         us_queue = _prioritize_universe(us_universe, conn, (max_calls - eu_quota) * 3, config)
 
+        status_map = {
+            r["ticker"]: dict(r) for r in conn.execute(
+                "SELECT ticker, last_evaluated, monopoly_score, last_filing_date "
+                "FROM company_status").fetchall()
+        }
+
         eu_selected, eu_skipped = _collect_batch_candidates(
-            eu_queue, eu_quota, conn, config, min_lane_score, privileged)
+            eu_queue, eu_quota, conn, config, min_lane_score, privileged,
+            status_map=status_map)
         us_selected, us_skipped = _collect_batch_candidates(
-            us_queue, max_calls - len(eu_selected), conn, config, min_lane_score, privileged)
+            us_queue, max_calls - len(eu_selected), conn, config, min_lane_score,
+            privileged, status_map=status_map)
         companies_with_filings = eu_selected + us_selected
         skipped_empty = eu_skipped + us_skipped
 
@@ -706,6 +813,11 @@ def main():
             batch_id = get_pending_batch(conn)
         if not batch_id:
             logger.error("No pending batch found. Run batch_submit first.")
+        elif (row := conn.execute(
+                "SELECT status FROM batch_runs WHERE batch_id = ?",
+                (batch_id,)).fetchone()) and row["status"] == "collected":
+            # Guard gegen Doppel-Collect (Backup-Cron): nie doppelt verarbeiten
+            logger.info(f"Batch {batch_id} wurde bereits eingesammelt — nichts zu tun")
         else:
             result = collect_batch(batch_id, conn, config, dry_run=args.dry_run)
             logger.info(f"Batch collect result: {result}")
