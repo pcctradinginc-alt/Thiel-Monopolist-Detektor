@@ -495,3 +495,48 @@ def test_batch_candidate_gates():
         sel, _ = _collect_batch_candidates(queue, 10, conn, config, 55, set(),
                                            status_map=status_map)
         assert len(sel) == 0, "Frisch bewerteter Low-Scorer muss übersprungen werden"
+
+
+def test_esef_text_extraction():
+    """ESEF-XHTML → Fließtext + Abschnitts-Slicing (rein, ohne Netz)."""
+    from data.esef_fetcher import _strip_xhtml, _extract_section, _SECTION_ANCHORS
+    html = (
+        "<html><head><style>p{color:red}</style></head><body>"
+        + "<p>Inhaltsverzeichnis Eintrag</p>" * 50
+        + "<h1>Geschäftsmodell</h1><p>Wir sind Weltmarktführer für Nischenprodukte.</p>"
+        + "<h2>Risikobericht</h2><p>Wesentliche Risiken bestehen im Wettbewerb.</p>"
+        + "</body></html>"
+    )
+    text = _strip_xhtml(html)
+    assert "<" not in text and "color:red" not in text
+
+    biz = _extract_section(text, _SECTION_ANCHORS["business_description"], window=300)
+    assert "Weltmarktführer" in biz
+
+    risk = _extract_section(text, _SECTION_ANCHORS["risk_factors"], window=300)
+    assert "Wettbewerb" in risk
+
+    # Kein Anker → leer (Caller nutzt Fallback)
+    assert _extract_section(text, ["nicht vorhanden"], window=300) == ""
+
+
+def test_under_followed_lane_boost():
+    """Coverage-Filter: <3 Analysten boosten Lane-Score, aber nur mit anderem Signal."""
+    from data.filing_collector import compute_lane_scores
+    base = {
+        "business_description": "platform ecosystem marketplace api developer community",
+        "mda": "", "s1_text": "", "keyword_count": 0,
+        "financial_signals": {"analyst_count": 1},
+    }
+    with_boost = compute_lane_scores(base, {})
+    assert "under_followed" in with_boost["lanes"]
+
+    well_covered = {**base, "financial_signals": {"analyst_count": 25}}
+    without = compute_lane_scores(well_covered, {})
+    assert "under_followed" not in without["lanes"]
+
+    # Ohne anderes Moat-Signal kein Boost (sonst priorisiert er Leerstellen)
+    empty = {"business_description": "", "mda": "", "s1_text": "",
+             "keyword_count": 0, "financial_signals": {"analyst_count": 1}}
+    no_signal = compute_lane_scores(empty, {})
+    assert "under_followed" not in no_signal["lanes"]

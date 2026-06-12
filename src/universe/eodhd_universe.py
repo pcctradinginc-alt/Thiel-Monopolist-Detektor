@@ -34,6 +34,9 @@ EXCHANGE_MAP = {
     "OL":    ("ose",    ".OL", "NO"),
     "BR":    ("bru",    ".BR", "BE"),
     "VI":    ("vienna", ".VI", "AT"),
+    "LSE":   ("lse",    ".L",  "GB"),
+    "MI":    ("milan",  ".MI", "IT"),
+    "MC":    ("madrid", ".MC", "ES"),
 }
 
 # Noise filter: names that indicate non-stocks

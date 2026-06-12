@@ -251,7 +251,25 @@ def fetch_eu_filing_data(ticker: str, company_name: str, exchange: str = "xetra"
                 result["filing_date"] = ch_result.get("filing_date")
                 result["has_10k"] = True
 
-    # ── Text Source 3: Wikipedia (kostenlos, ~60-70% Abdeckung) ─────────────
+    # ── Text Source 3: ESEF-Geschäftsbericht (filings.xbrl.org, alle EU) ────
+    # Echte Berichtsabschnitte statt Kurzbeschreibungen — der größte Hebel
+    # für die Datenqualität bei EU-Small-Caps. Nur wenn Text noch dünn ist.
+    biz_words = len((result["business_description"] or "").split())
+    if biz_words < 250 and company_name:
+        from data.esef_fetcher import fetch_esef_text
+        esef = fetch_esef_text(company_name, ticker)
+        if not esef.get("error") and esef.get("business_description"):
+            result["business_description"] = esef["business_description"]
+            if esef.get("risk_factors"):
+                result["risk_factors"] = esef["risk_factors"]
+            if esef.get("mda"):
+                result["mda"] = esef["mda"]
+            if esef.get("filing_date"):
+                result["filing_date"] = esef["filing_date"]
+            result["has_10k"] = True
+            result["source_enriched"] = "esef"
+
+    # ── Text Source 4: Wikipedia (kostenlos, ~60-70% Abdeckung) ─────────────
     # Für Firmen die weder Bundesanzeiger noch yfinance-Beschreibung haben
     # Primär: kleinere Nordics, Benelux, AT-Firmen
     if not result["business_description"] and company_name:
@@ -395,6 +413,7 @@ def _extract_financial_signals(ticker: str, company) -> dict:
         "has_nrr_mention": False,
         "has_rpo_mention": False,
         "operating_leverage_signal": False,
+        "analyst_count": None,
     }
 
     if not YFINANCE_AVAILABLE:
@@ -403,6 +422,12 @@ def _extract_financial_signals(ticker: str, company) -> dict:
     try:
         ticker_obj = yf.Ticker(ticker)
         info = ticker_obj.info
+
+        # Analysten-Abdeckung: bei <3 Analysten ist Fehlbepreisung strukturell
+        # wahrscheinlicher — dort hat systematisches Lesen den größten Vorsprung
+        analyst_count = info.get("numberOfAnalystOpinions")
+        if analyst_count is not None:
+            signals["analyst_count"] = int(analyst_count)
 
         # Basic margins from yfinance
         gross_margin = info.get("grossMargins")
@@ -587,6 +612,20 @@ def compute_lane_scores(filing_data: dict, config: dict) -> dict:
         # Moderates Signal — reicht für LLM-Call
         lanes["financial_quality"] = 30
         total_score += 30
+
+    # Lane 7: Under-Followed (Coverage-Filter)
+    # Bei < 3 Analysten ist Fehlbepreisung strukturell wahrscheinlicher —
+    # genau dort hat systematisches Filing-Lesen den größten Vorsprung.
+    # Boost nur wenn ein anderes Moat-Signal existiert (sonst priorisiert
+    # er bloß illiquide Leerstellen).
+    analyst_count = signals.get("analyst_count")
+    if analyst_count is not None and lanes:
+        if analyst_count < 3:
+            lanes["under_followed"] = 25
+            total_score += 25
+        elif analyst_count <= 5:
+            lanes["under_followed"] = 12
+            total_score += 12
 
     return {
         "lanes": lanes,

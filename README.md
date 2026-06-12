@@ -90,6 +90,15 @@ LLM-Call-Budgets pro Lauf.
 Plattform-Vokabular nicht dauerhaft aussperren. Neue Filings triggern
 Re-Analyse (Rotation-Trigger via `last_filing_date`).
 
+**EU-Datenquellen (alle kostenlos):** EODHD-Symbol-Listen (~3.500 Aktien über
+13 Börsen inkl. London/Mailand/Madrid) statt nur kuratierter Seeds.
+Filing-Texte in dieser Reihenfolge: Bundesanzeiger (DE) → Companies House (UK)
+→ **ESEF-Geschäftsberichte** via filings.xbrl.org + GLEIF-LEI-Lookup (alle EU,
+echte Berichtsabschnitte: Geschäftsmodell, Risikobericht, Lagebericht) →
+Wikipedia-Fallback. Firmen mit < 3 Analysten (`numberOfAnalystOpinions`)
+bekommen einen Lane-Boost (`under_followed`) — dort ist Fehlbepreisung
+strukturell am wahrscheinlichsten.
+
 **Kosten-Optimierung:** Low-Scorer (< 40) mit Bewertung jünger als 120 Tage
 werden übersprungen; Filing-Snapshots jünger als 45 Tage werden aus der DB
 wiederverwendet statt EDGAR neu zu parsen (10-Ks sind jährlich). Das freie

@@ -67,6 +67,10 @@ jobs:
           EULERPOOL_API_KEY: ${{ secrets.EULERPOOL_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SEC_CONTACT_EMAIL: ${{ secrets.SEC_CONTACT_EMAIL }}
+          # Ohne diese Keys lief das EU-Universe nur mit ~600 Seeds statt
+          # ~3.500 Aktien (EODHD) und ohne UK-Filing-Texte (Companies House)
+          EODHD_API_KEY: ${{ secrets.EODHD_API_KEY }}
+          COMPANIES_HOUSE_API_KEY: ${{ secrets.COMPANIES_HOUSE_API_KEY }}
         run: |
           mkdir -p data logs
           python src/main.py --mode batch_submit
