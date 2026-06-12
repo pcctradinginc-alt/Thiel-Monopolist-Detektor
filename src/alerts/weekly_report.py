@@ -79,7 +79,50 @@ def _fetch_top_candidates(conn, top_n: int = 15, days_back: int = 8) -> list[dic
     return candidates
 
 
-def build_report_markdown(candidates: list[dict]) -> str:
+def _enrich_with_entry_signals(candidates: list[dict]) -> None:
+    """Einstiegssignal (Preis, Drawdown, P/S, Einstufung) pro Kandidat ergänzen."""
+    from analysis.entry_signal import compute_entry_signal
+    for c in candidates:
+        try:
+            c["entry"] = compute_entry_signal(
+                c["ticker"], c["monopoly_score"], c["consecutive_runs"])
+        except Exception as e:
+            logger.warning(f"{c['ticker']}: entry signal failed: {e}")
+            c["entry"] = {"classification": "WATCH", "reason": "keine Marktdaten"}
+
+
+def _fetch_open_signals_performance(conn) -> list[dict]:
+    """
+    Offene Signale mit Performance seit Signalzeitpunkt.
+    Feedback-Loop: Hätten die bisherigen Signale Geld verdient?
+    """
+    from analysis.entry_signal import fetch_current_price
+    try:
+        rows = conn.execute("""
+            SELECT ticker, signal_date, alert_type, price_at_signal, decision_status
+            FROM signals
+            WHERE decision_status IN ('WATCH', 'CANDIDATE', 'BOUGHT')
+              AND price_at_signal IS NOT NULL
+            ORDER BY signal_date DESC
+            LIMIT 20
+        """).fetchall()
+    except Exception as e:
+        logger.warning(f"Open signals query failed: {e}")
+        return []
+
+    results = []
+    for row in rows:
+        r = dict(row)
+        current = fetch_current_price(r["ticker"])
+        perf = None
+        if current and r["price_at_signal"]:
+            perf = round((current / r["price_at_signal"] - 1) * 100, 1)
+        results.append({**r, "current_price": current, "performance_pct": perf})
+    return results
+
+
+def build_report_markdown(candidates: list[dict],
+                          open_signals: list[dict] = None) -> str:
     """Markdown-Report aus der Kandidatenliste."""
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     eu_count = sum(1 for c in candidates if c["region"] == "EU")
@@ -92,16 +135,36 @@ def build_report_markdown(candidates: list[dict]) -> str:
         "sortiert nach Monopoly-Score. Kein Kandidat ist eine Kaufempfehlung — "
         "die Liste priorisiert, was eine menschliche Tiefenanalyse verdient.",
         "",
-        "| # | Ticker | Region | Mono | Conf | DQ | Runs≥65 | Status | Alert |",
-        "|---|--------|--------|------|------|----|---------|--------|-------|",
+        "| # | Ticker | Region | Mono | Runs≥65 | Status | Preis | Δ52wH | P/S | Einstufung |",
+        "|---|--------|--------|------|---------|--------|-------|-------|-----|------------|",
     ]
     for i, c in enumerate(candidates, 1):
-        alert = c["alert_type"] or "—"
+        e = c.get("entry", {})
+        price = e.get("price")
+        dd = e.get("drawdown_pct")
+        ps = e.get("ps_ratio")
         lines.append(
             f"| {i} | **{c['ticker']}** | {c['region']} | {c['monopoly_score']} "
-            f"| {c['confidence_score']} | {c['data_quality_score']} "
-            f"| {c['consecutive_runs']} | {c['status']} | {alert} |"
+            f"| {c['consecutive_runs']} | {c['status']} "
+            f"| {price if price is not None else '—'} "
+            f"| {f'-{dd}%' if dd is not None else '—'} "
+            f"| {ps if ps is not None else '—'} "
+            f"| **{e.get('classification', 'WATCH')}** |"
         )
+
+    # Kauffenster prominent herausstellen
+    buy_windows = [c for c in candidates
+                   if c.get("entry", {}).get("classification") == "KAUFFENSTER"]
+    if buy_windows:
+        lines.append("")
+        lines.append("## 🎯 Kauffenster (bestätigter Moat + Preis)")
+        lines.append("")
+        for c in buy_windows:
+            lines.append(f"- **{c['ticker']}** ({c['region']}): {c['entry']['reason']}")
+    else:
+        lines.append("")
+        lines.append("> Kein Kandidat erfüllt aktuell beides: bestätigter Moat "
+                      "(≥2 Runs ≥65) **und** vernünftiger Einstiegspreis.")
 
     lines.append("")
     lines.append("## Kurzthesen")
@@ -109,7 +172,26 @@ def build_report_markdown(candidates: list[dict]) -> str:
     for i, c in enumerate(candidates, 1):
         thesis = c["summary"] or "Keine Zusammenfassung verfügbar."
         market = f" — *Enger Markt: {c['narrow_market']}*" if c["narrow_market"] else ""
-        lines.append(f"{i}. **{c['ticker']}** ({c['region']}): {thesis}{market}")
+        entry_reason = c.get("entry", {}).get("reason", "")
+        entry_note = f" — *Einstieg: {entry_reason}*" if entry_reason else ""
+        lines.append(f"{i}. **{c['ticker']}** ({c['region']}): {thesis}{market}{entry_note}")
+
+    # Performance-Tracking: Hätten die bisherigen Signale Geld verdient?
+    if open_signals:
+        lines.append("")
+        lines.append("## Offene Signale — Performance seit Signal")
+        lines.append("")
+        lines.append("| Ticker | Signal | Datum | Kurs damals | Kurs jetzt | Performance |")
+        lines.append("|--------|--------|-------|-------------|------------|-------------|")
+        for s in open_signals:
+            perf = s.get("performance_pct")
+            perf_str = f"{'+' if perf and perf > 0 else ''}{perf}%" if perf is not None else "—"
+            lines.append(
+                f"| {s['ticker']} | {s.get('alert_type') or '—'} "
+                f"| {(s.get('signal_date') or '')[:10]} "
+                f"| {s.get('price_at_signal') or '—'} "
+                f"| {s.get('current_price') or '—'} | {perf_str} |"
+            )
 
     if eu_count == 0:
         lines.append("")
@@ -118,7 +200,8 @@ def build_report_markdown(candidates: list[dict]) -> str:
 
     lines.append("")
     lines.append("---")
-    lines.append("*Automatisch generiert vom Thiel Monopolist Detector.*")
+    lines.append("*Automatisch generiert vom Thiel Monopolist Detector. "
+                  "Einstufungen sind regelbasierte Priorisierung, keine Anlageberatung.*")
     return "\n".join(lines)
 
 
@@ -202,7 +285,9 @@ def post_weekly_report(conn, config: dict, top_n: int = 15,
         logger.warning("Weekly report: no candidates evaluated this week — skipping")
         return {"candidates": 0, "issue": None, "email_sent": False}
 
-    markdown = build_report_markdown(candidates)
+    _enrich_with_entry_signals(candidates)
+    open_signals = _fetch_open_signals_performance(conn)
+    markdown = build_report_markdown(candidates, open_signals=open_signals)
 
     if dry_run:
         logger.info(f"DRY RUN — weekly report with {len(candidates)} candidates:\n{markdown}")

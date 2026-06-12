@@ -56,6 +56,22 @@ E-Mail — mit Scores, Status, Kurzthese und engem Markt. Damit liefert jeder
 Wochenlauf konkrete Namen für die menschliche Tiefenanalyse, auch wenn kein
 Kandidat die harten Alert-Schwellen reißt.
 
+Jeder Kandidat bekommt zusätzlich ein **Einstiegssignal** (kostenlos via
+yfinance): Preis, Abstand zum 52-Wochen-Hoch, P/S und eine regelbasierte
+Einstufung —
+
+| Einstufung | Bedeutung |
+|------------|-----------|
+| `KAUFFENSTER` | Bestätigter Moat (≥2 Runs ≥65) + Rücksetzer ≥15 % oder moderates P/S + Wachstum intakt |
+| `QUALITAET_TEUER` | Bestätigter Moat, aber nahe Hoch und hohe Bewertung — auf Rücksetzer warten |
+| `THESE_PRUEFEN` | Bestätigter Moat, aber Umsatz/Marge widersprechen der These |
+| `WATCH` | Moat noch nicht über 2 Wochen bestätigt |
+
+Dazu trackt der Report die **Performance aller offenen Signale** seit
+Signalzeitpunkt (Kurs damals vs. jetzt) — der Feedback-Loop, ob die Signale
+tatsächlich Geld verdient hätten. Alles regelbasierte Priorisierung, keine
+Anlageberatung.
+
 ## Persistenz
 
 Die SQLite-DB wird nach jedem Lauf als GitHub-Release-Asset `db-latest`

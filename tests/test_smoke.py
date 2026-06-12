@@ -394,3 +394,38 @@ def test_weekly_report_markdown():
     assert "FICO" in md and "NEM.DE" in md
     assert "| US |" in md and "| EU |" in md
     assert "1 US, 1 EU" in md
+
+
+def test_classify_entry():
+    """Einstiegslogik: Moat + Preis-Kontext → Einstufung (rein, ohne Netz)."""
+    from analysis.entry_signal import classify_entry
+
+    # Nicht bestätigt (nur 1 Run) → WATCH, egal wie billig
+    cls, _ = classify_entry(70, 1, drawdown_pct=30.0, ps_ratio=3.0,
+                            revenue_growth_pct=20.0)
+    assert cls == "WATCH"
+
+    # Bestätigt + Pullback + moderates P/S + Wachstum → KAUFFENSTER
+    cls, _ = classify_entry(68, 2, drawdown_pct=20.0, ps_ratio=5.0,
+                            revenue_growth_pct=15.0)
+    assert cls == "KAUFFENSTER"
+
+    # Bestätigt, aber nahe Hoch und teuer → QUALITAET_TEUER
+    cls, _ = classify_entry(68, 2, drawdown_pct=3.0, ps_ratio=15.0,
+                            revenue_growth_pct=15.0)
+    assert cls == "QUALITAET_TEUER"
+
+    # Bestätigt, aber Umsatz schrumpft → THESE_PRUEFEN (schlägt Pullback)
+    cls, _ = classify_entry(68, 2, drawdown_pct=40.0, ps_ratio=2.0,
+                            revenue_growth_pct=-5.0)
+    assert cls == "THESE_PRUEFEN"
+
+    # Bestätigt + moderate Bewertung ohne Pullback → KAUFFENSTER
+    cls, _ = classify_entry(68, 2, drawdown_pct=5.0, ps_ratio=4.0,
+                            revenue_growth_pct=10.0)
+    assert cls == "KAUFFENSTER"
+
+    # Fehlende Marktdaten → kein Crash, konservative Einstufung
+    cls, _ = classify_entry(68, 2, drawdown_pct=None, ps_ratio=None,
+                            revenue_growth_pct=None)
+    assert cls == "QUALITAET_TEUER"
