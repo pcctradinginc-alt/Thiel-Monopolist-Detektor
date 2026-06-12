@@ -72,6 +72,25 @@ Signalzeitpunkt (Kurs damals vs. jetzt) — der Feedback-Loop, ob die Signale
 tatsächlich Geld verdient hätten. Alles regelbasierte Priorisierung, keine
 Anlageberatung.
 
+## Tiefenanalyse + Trade-Empfehlung (automatisch)
+
+Erreicht ein Kandidat die Bestätigung (Score ≥ 65 in ≥ 2 Runs), startet
+automatisch eine **Initiation-of-Coverage-Tiefenanalyse** — bei erwartet
+2–7 Fällen/Jahr leistet sich das System dafür das beste Setup: Sonnet mit
+Live-Websuche (Wettbewerb, News, Peers), voller Filing-Kontext,
+4-Jahres-Finanzhistorie, Score-Verlauf des eigenen Screenings.
+
+Der Report (GitHub Issue mit Label `deep-dive` + E-Mail) enthält:
+Moat-Audit, enger Markt & Expansionspfad, Wettbewerbsverifikation,
+Unit Economics, **Bear/Base/Bull-Kursziele mit Annahmen**, Einstiegszone,
+Positionsgrößen-Vorschlag (1–5 %), Stop und messbare **Kill-Kriterien** —
+plus strukturierte Empfehlung: `KAUFEN` / `BEOBACHTEN` / `ABLEHNEN`.
+Alles landet in der `deep_dives`-Tabelle; ein `ABLEHNEN` mit guter
+Begründung gilt als gleichwertiges Ergebnis. **Die Ausführung bleibt
+manuell** — das System erstellt die Entscheidungsvorlage, platziert aber
+nie Orders (Kostendeckel: max. 2 Deep Dives pro Lauf, 120 Tage Cooldown
+pro Ticker, ~0,50 USD pro Report).
+
 ## Persistenz
 
 Die SQLite-DB wird nach jedem Lauf als GitHub-Release-Asset `db-latest`

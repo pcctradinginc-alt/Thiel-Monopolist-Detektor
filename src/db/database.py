@@ -260,6 +260,32 @@ CREATE INDEX IF NOT EXISTS idx_feedback_verdict ON human_feedback(verdict);
 CREATE INDEX IF NOT EXISTS idx_signals_ticker ON signals(ticker);
 CREATE INDEX IF NOT EXISTS idx_signals_date ON signals(signal_date);
 CREATE INDEX IF NOT EXISTS idx_signals_status ON signals(decision_status);
+
+-- Deep Dives: automatische Tiefenanalysen für bestätigte Kandidaten
+-- (~2-7/Jahr). Empfehlung ist Entscheidungsvorlage — Ausführung bleibt manuell.
+CREATE TABLE IF NOT EXISTS deep_dives (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ticker TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+
+    recommendation TEXT CHECK(recommendation IN ('KAUFEN', 'BEOBACHTEN', 'ABLEHNEN')),
+    confidence INTEGER,                 -- 0-100
+    entry_low REAL,                     -- Einstiegszone
+    entry_high REAL,
+    stop_price REAL,                    -- Kill-Level
+    target_bear REAL,                   -- Kursziele je Szenario
+    target_base REAL,
+    target_bull REAL,
+    position_size_pct REAL,             -- Vorschlag % des Portfolios
+
+    kill_criteria TEXT,                 -- JSON: was die These widerlegen würde
+    report_md TEXT,                     -- voller Markdown-Report
+    issue_number INTEGER,               -- GitHub Issue
+
+    FOREIGN KEY (ticker) REFERENCES companies(ticker)
+);
+
+CREATE INDEX IF NOT EXISTS idx_deep_dives_ticker ON deep_dives(ticker);
 """
 
 

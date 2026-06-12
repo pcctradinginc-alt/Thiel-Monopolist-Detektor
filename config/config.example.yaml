@@ -170,6 +170,17 @@ screening:
       weight: 1.0
       tickers: []
 
+# Tiefenanalyse + Trade-Empfehlung für bestätigte Kandidaten (~2-7/Jahr).
+# Teuerstes Modell + Websuche — bei der Frequenz vernachlässigbar (~0,50 USD/Report).
+deep_dive:
+  enabled: true
+  min_monopoly_score: 65
+  min_consecutive_runs: 2
+  max_per_run: 2            # Kostendeckel pro Wochenlauf
+  cooldown_days: 120        # kein zweiter Deep Dive desselben Tickers vorher
+  web_search: true          # Wettbewerb/News live verifizieren
+  model: "claude-sonnet-4-6"
+
 alerts:
   min_score_delta_for_alert: 8          # Score-Sprung überschreibt Cooldown
   alert_cooldown_days: 21               # Kein zweiter Alert (außer Delta >= 8 oder MOAT_RISK)

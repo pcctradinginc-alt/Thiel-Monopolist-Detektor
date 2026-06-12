@@ -540,3 +540,55 @@ def test_under_followed_lane_boost():
              "keyword_count": 0, "financial_signals": {"analyst_count": 1}}
     no_signal = compute_lane_scores(empty, {})
     assert "under_followed" not in no_signal["lanes"]
+
+
+def test_deep_dive_parse_response():
+    """JSON-Block + Markdown-Report werden sauber getrennt."""
+    from analysis.deep_dive import _parse_response
+    raw = '''```json
+{"recommendation": "KAUFEN", "confidence": 72, "entry_low": 100.0,
+ "entry_high": 115.0, "stop_price": 85.0, "target_bear": 90.0,
+ "target_base": 160.0, "target_bull": 220.0, "position_size_pct": 3,
+ "kill_criteria": ["NRR faellt unter 100%"]}
+```
+
+# Tiefenanalyse TST
+## 1. Executive Summary
+Starker Moat, faire Bewertung.'''
+    structured, md = _parse_response(raw)
+    assert structured["recommendation"] == "KAUFEN"
+    assert structured["confidence"] == 72
+    assert structured["kill_criteria"] == ["NRR faellt unter 100%"]
+    assert md.startswith("# Tiefenanalyse TST")
+    assert "```json" not in md
+
+    # Kaputtes JSON → leeres Dict, Report bleibt nutzbar
+    structured2, md2 = _parse_response("kein json hier\n# Report")
+    assert structured2 == {}
+    assert "# Report" in md2
+
+
+def test_deep_dive_candidate_trigger():
+    """Trigger: Score >= 65 + >= 2 Runs + frisch evaluiert + Cooldown beachtet."""
+    from datetime import datetime, timezone
+    from db.database import init_db
+    from analysis.deep_dive import find_deep_dive_candidates
+    with tempfile.NamedTemporaryFile(suffix=".db") as f:
+        conn = init_db(f.name)
+        now = datetime.now(timezone.utc).isoformat()
+        for tkr, score, runs in [("HIT", 70, 2), ("LOWRUNS", 80, 1), ("LOWSCORE", 50, 3)]:
+            conn.execute("INSERT INTO companies (ticker, name, is_active) VALUES (?, ?, 1)",
+                         (tkr, tkr))
+            conn.execute("""
+                INSERT INTO company_status
+                (ticker, current_status, monopoly_score, consecutive_high_score_runs,
+                 last_evaluated) VALUES (?, 'PARTIAL', ?, ?, ?)
+            """, (tkr, score, runs, now))
+
+        cands = find_deep_dive_candidates(conn, {})
+        assert [c["ticker"] for c in cands] == ["HIT"]
+
+        # Nach einem Deep Dive greift der Cooldown
+        conn.execute("INSERT INTO deep_dives (ticker, created_at, recommendation) "
+                     "VALUES ('HIT', ?, 'KAUFEN')", (now,))
+        assert find_deep_dive_candidates(conn, {}) == []

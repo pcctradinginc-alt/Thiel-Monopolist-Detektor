@@ -827,6 +827,12 @@ def main():
                 report_outcome = post_weekly_report(conn, config, dry_run=args.dry_run)
                 logger.info(f"Weekly report: {report_outcome}")
 
+                # Tiefenanalyse + Trade-Empfehlung für bestätigte Kandidaten
+                # (selten — erwartete 2-7/Jahr — daher teuerstes Modell + Websuche)
+                from analysis.deep_dive import run_deep_dives
+                dd_outcome = run_deep_dives(conn, config, dry_run=args.dry_run)
+                logger.info(f"Deep dives: {dd_outcome}")
+
     elif args.mode == "feedback":
         count = process_feedback(conn, config)
         logger.info(f"Processed {count} feedback items")
