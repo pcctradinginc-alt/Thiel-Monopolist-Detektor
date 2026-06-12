@@ -123,9 +123,11 @@ screening:
   # das Keyword-Gate darf einen Monopolisten nicht dauerhaft aussperren
   baseline_lane_score: 25
   # Kosten: Firmen mit Score < threshold und Bewertung jünger als N Tage
-  # werden nicht erneut durchs LLM gejagt (Budget fließt in neue Namen)
+  # werden nicht erneut durchs LLM gejagt (Budget fließt in neue Namen).
+  # Recall-sicher: ein neues Filing seit der letzten Bewertung hebt den
+  # Skip auf — gestreckt werden nur Re-Evals auf unveränderten Daten.
   low_score_threshold: 40
-  low_score_reeval_days: 120
+  low_score_reeval_days: 240
   # Kosten: Filing-Snapshots jünger als N Tage wiederverwenden statt
   # EDGAR/yfinance neu abzufragen (10-Ks sind jährlich)
   snapshot_reuse_days: 45

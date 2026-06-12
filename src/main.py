@@ -355,6 +355,19 @@ def _prioritize_universe(universe: list[dict], conn, max_calls: int,
             "last_filing_date": r.get("last_filing_date"),
         }
 
+    # Jüngstes Snapshot-Filing überlagert company_status.last_filing_date:
+    # Letzteres wird nur bei einer Evaluation geschrieben — neue Filings
+    # zwischen Evaluationen sind ausschließlich in filing_snapshots sichtbar
+    # (Snapshots werden bei jedem Fetch gespeichert, auch ohne Evaluation).
+    snap_rows = conn.execute(
+        "SELECT ticker, filing_date, MAX(fetched_at) FROM filing_snapshots "
+        "WHERE filing_date != 'unknown' GROUP BY ticker"
+    ).fetchall()
+    for row in snap_rows:
+        t = row["ticker"]
+        if t in known:
+            known[t]["last_filing_date"] = row["filing_date"]
+
     now = datetime.now(timezone.utc)
     two_weeks_ago   = now - timedelta(days=14)
     eight_weeks_ago = now - timedelta(days=56)
@@ -396,15 +409,12 @@ def _prioritize_universe(universe: list[dict], conn, max_calls: int,
             always.append(company)
             continue
 
-        # Bucket 3: Trigger — neues Filing nach letzter Analyse
-        if last_filing_str:
-            try:
-                last_filing = datetime.fromisoformat(last_filing_str)
-                if last_filing > last_eval:
-                    triggered.append(company)
-                    continue
-            except Exception:
-                pass
+        # Bucket 3: Trigger — neues Filing nach letzter Analyse.
+        # String-Vergleich auf Datums-Präfix: filing_date ist date-only (naiv),
+        # last_eval ist aware — datetime-Vergleich würde TypeError werfen.
+        if last_filing_str and last_filing_str[:10] > last_eval_str[:10]:
+            triggered.append(company)
+            continue
 
         # Bucket 4+5: Fällig je nach Tier
         if tier == "core" and last_eval < two_weeks_ago:
@@ -500,7 +510,7 @@ def _collect_batch_candidates(queue: list[dict], budget: int, conn, config: dict
     screening_cfg = config.get("screening", {})
     baseline_gate = screening_cfg.get("baseline_lane_score", 25)
     low_score = screening_cfg.get("low_score_threshold", 40)
-    low_score_days = screening_cfg.get("low_score_reeval_days", 120)
+    low_score_days = screening_cfg.get("low_score_reeval_days", 240)
     reuse_days = screening_cfg.get("snapshot_reuse_days", 45)
     reeval_cutoff = (datetime.now(timezone.utc)
                      - timedelta(days=low_score_days)).isoformat()
@@ -519,15 +529,6 @@ def _collect_batch_candidates(queue: list[dict], budget: int, conn, config: dict
 
         is_privileged = ticker in privileged
         prev = status_map.get(ticker)
-
-        # Kosten: Low-Scorer mit junger Bewertung nicht erneut durchs LLM jagen
-        if not is_privileged and prev:
-            prev_score = prev.get("monopoly_score")
-            last_eval = prev.get("last_evaluated") or ""
-            if prev_score is not None and prev_score < low_score \
-                    and last_eval >= reeval_cutoff:
-                skipped_low += 1
-                continue
 
         # Kosten: frischen Snapshot wiederverwenden statt neu zu fetchen
         cached = _load_snapshot_as_filing(conn, ticker, reuse_days)
@@ -548,6 +549,23 @@ def _collect_batch_candidates(queue: list[dict], budget: int, conn, config: dict
             # nicht selektierte Firmen jede Woche neu gefetcht und die
             # Snapshot-Wiederverwendung greift nie für die Mehrheit.
             save_filing_snapshot(conn, ticker, filing_data, lane_data)
+
+        # Kosten: Low-Scorer mit junger Bewertung nicht erneut durchs LLM jagen.
+        # Bewusst NACH dem Fetch: Nur das frische filing_date kann ein neues
+        # Filing erkennen — company_status.last_filing_date wird erst bei einer
+        # Evaluation geschrieben und bleibt für Übersprungene ewig alt.
+        # Ein neues Filing seit der letzten Bewertung hebt den Skip auf.
+        if not is_privileged and prev:
+            prev_score = prev.get("monopoly_score")
+            last_eval = prev.get("last_evaluated") or ""
+            filing_date = filing_data.get("filing_date") or ""
+            has_new_filing = bool(
+                filing_date and filing_date != "unknown" and last_eval
+                and filing_date[:10] > last_eval[:10])
+            if prev_score is not None and prev_score < low_score \
+                    and last_eval >= reeval_cutoff and not has_new_filing:
+                skipped_low += 1
+                continue
 
         biz_words = len((filing_data.get("business_description") or "").split())
         dq = compute_data_quality_score(filing_data)

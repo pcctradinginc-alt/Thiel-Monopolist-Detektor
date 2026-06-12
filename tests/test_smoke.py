@@ -496,6 +496,16 @@ def test_batch_candidate_gates():
                                            status_map=status_map)
         assert len(sel) == 0, "Frisch bewerteter Low-Scorer muss übersprungen werden"
 
+        # Neues Filing nach der letzten Bewertung → Skip aufgehoben (Recall).
+        # Erkennung läuft über das frische filing_date aus dem Snapshot/Fetch,
+        # nicht über company_status (das für Übersprungene nie aktualisiert wird).
+        new_filing = {**filing_data, "filing_date": "2099-12-31"}
+        save_filing_snapshot(conn, "TST", new_filing,
+                             {"total_lane_score": 60, "lanes": {}})
+        sel, _ = _collect_batch_candidates(queue, 10, conn, config, 55, set(),
+                                           status_map=status_map)
+        assert len(sel) == 1, "Neues Filing muss den Low-Score-Skip aufheben"
+
 
 def test_esef_text_extraction():
     """ESEF-XHTML → Fließtext + Abschnitts-Slicing (rein, ohne Netz)."""

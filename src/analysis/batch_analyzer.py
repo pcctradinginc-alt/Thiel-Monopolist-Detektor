@@ -271,7 +271,9 @@ def build_batch_request(ticker: str, filing_data: dict, model: str) -> dict:
         "custom_id": ticker,
         "params": {
             "model": model,
-            "max_tokens": 4096,
+            # Schema-konforme Antworten brauchen ~600-900 Tokens; der Deckel
+            # verhindert nur Ausreißer (Output ist der teuerste Token-Posten)
+            "max_tokens": 2000,
             "messages": [{
                 "role": "user",
                 "content": [

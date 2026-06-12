@@ -192,13 +192,17 @@ Siehe `docs/schema.md`
 
 ## Kosten-Schätzung
 
-| Komponente | Kosten/Woche |
+| Komponente | Kosten/Monat |
 |------------|-------------|
-| Claude Haiku (Screening ~100 Calls) | ~$0.20 |
-| Claude Sonnet (Finale ~10 Calls) | ~$0.50 |
-| Turso Free Tier | $0 |
-| GitHub Actions | $0 |
-| **Gesamt** | **~$0.70/Woche** |
+| Claude Haiku Batch (Screening, ~450–750 Calls/Woche) | ~$4–9 |
+| Claude Sonnet (Deep Dives, 2–7/Jahr) | ~$0.10–0.20 |
+| EODHD / yfinance / GLEIF / ESEF / SEC EDGAR | $0 |
+| GitHub Actions (Public Repo) | $0 |
+| **Gesamt** | **~$4–9/Monat** |
+
+Eingebaute Kostenbremsen: Batch API (−50 %), Prompt-Caching auf dem
+statischen Analyse-Prompt, `max_tokens`-Deckel, Low-Score-Skip (240 Tage,
+aufgehoben bei neuem Filing), Snapshot-Wiederverwendung (45 Tage).
 
 ## Lizenz
 
