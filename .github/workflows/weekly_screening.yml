@@ -58,6 +58,7 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           EULERPOOL_API_KEY: ${{ secrets.EULERPOOL_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SEC_CONTACT_EMAIL: ${{ secrets.SEC_CONTACT_EMAIL }}
         run: |
           mkdir -p data logs
           python src/main.py --mode batch_submit
@@ -157,6 +158,7 @@ jobs:
           GITHUB_REPO: pcctradinginc-alt/Thiel-Monopolist-Detektor
           COMPANIES_HOUSE_API_KEY: ${{ secrets.COMPANIES_HOUSE_API_KEY }}
           EODHD_API_KEY: ${{ secrets.EODHD_API_KEY }}
+          SEC_CONTACT_EMAIL: ${{ secrets.SEC_CONTACT_EMAIL }}
           MANUAL_BATCH_ID: ${{ github.event.inputs.batch_id }}
         run: |
           mkdir -p data logs

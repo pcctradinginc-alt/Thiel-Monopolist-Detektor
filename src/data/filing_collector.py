@@ -10,6 +10,7 @@ edgartools is the most stable free source — no rate limits, SEC legal obligati
 """
 
 import logging
+import os
 import time
 import re
 from typing import Optional
@@ -74,9 +75,21 @@ CAMOUFLAGE_KEYWORDS = [
 
 
 def set_edgar_identity():
-    """Set required identity for SEC EDGAR API calls."""
-    if EDGAR_AVAILABLE:
-        set_identity("ThielDetector info@pcctradinginc.com")
+    """
+    Set required identity for SEC EDGAR API calls.
+    Die SEC verlangt eine erreichbare Kontaktadresse im User-Agent —
+    bei den wöchentlichen Massenabrufen riskiert eine falsche Adresse IP-Sperren.
+    """
+    if not EDGAR_AVAILABLE:
+        return
+    contact = os.environ.get("SEC_CONTACT_EMAIL")
+    if not contact:
+        contact = "info@pcctradinginc.com"
+        logger.warning(
+            f"SEC_CONTACT_EMAIL nicht gesetzt — nutze Fallback {contact}. "
+            "Bitte als GitHub Secret / env-Variable konfigurieren."
+        )
+    set_identity(f"ThielDetector {contact}")
 
 
 def fetch_filing_data(ticker: str, cik: str = None) -> dict:

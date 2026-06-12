@@ -95,6 +95,7 @@ pip install -r requirements.txt
 | `EMAIL_SENDER` | Gmail-Adresse für Alerts |
 | `EMAIL_PASSWORD` | Gmail App-Passwort |
 | `EMAIL_RECIPIENT` | Empfänger-Adresse |
+| `SEC_CONTACT_EMAIL` | Echte Kontakt-E-Mail für den SEC-EDGAR-User-Agent (von der SEC für automatisierte Abrufe verlangt — Platzhalter riskieren IP-Sperren) |
 | `TURSO_URL` | (Optional) Turso DB URL für Produktion |
 | `TURSO_TOKEN` | (Optional) Turso Auth Token |
 
