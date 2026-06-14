@@ -243,6 +243,47 @@ def compute_data_quality_score(filing_data: dict) -> int:
 
 # ─── Batch Submit ─────────────────────────────────────────────────────────────
 
+def _encode_custom_id(ticker: str) -> str:
+    """
+    Encode a ticker into a custom_id valid for the Anthropic Batch API.
+
+    The API requires custom_id to match ^[a-zA-Z0-9_-]{1,64}$. Tickers contain
+    characters the pattern rejects — EU symbols carry an exchange suffix
+    (ASML.AS, SAP.DE) and US class shares use a dot too (BRK.B). We percent-style
+    escape every byte that isn't ASCII alphanumeric as '_XX' (uppercase hex),
+    reserving '_' as the escape marker. The transform is a bijection, so
+    collect_batch can recover the exact original ticker via _decode_custom_id.
+    """
+    out = []
+    for byte in ticker.encode("utf-8"):
+        ch = chr(byte)
+        if ch.isascii() and ch.isalnum():
+            out.append(ch)
+        else:
+            out.append(f"_{byte:02X}")
+    encoded = "".join(out)
+    if not 1 <= len(encoded) <= 64:
+        # Tickers are short, so this should never fire. Guard anyway so a
+        # pathological symbol fails loudly here instead of aborting the batch.
+        raise ValueError(f"custom_id out of range for ticker {ticker!r}: {encoded!r}")
+    return encoded
+
+
+def _decode_custom_id(custom_id: str) -> str:
+    """Inverse of _encode_custom_id — recover the original ticker."""
+    out = bytearray()
+    i = 0
+    while i < len(custom_id):
+        c = custom_id[i]
+        if c == "_":
+            out.append(int(custom_id[i + 1:i + 3], 16))
+            i += 3
+        else:
+            out.append(ord(c))
+            i += 1
+    return out.decode("utf-8")
+
+
 def build_batch_request(ticker: str, filing_data: dict, model: str) -> dict:
     """
     Build a single Anthropic batch request for one company.
@@ -268,7 +309,7 @@ def build_batch_request(ticker: str, filing_data: dict, model: str) -> dict:
     )
 
     return {
-        "custom_id": ticker,
+        "custom_id": _encode_custom_id(ticker),
         "params": {
             "model": model,
             # Schema-konforme Antworten brauchen ~600-900 Tokens; der Deckel
@@ -385,7 +426,7 @@ def collect_batch(batch_id: str, conn, config: dict, dry_run: bool = False) -> d
         # Temporarily disable FK checks for bulk pre-registration
         conn.execute("PRAGMA foreign_keys=OFF")
         for req_result in client.beta.messages.batches.results(batch_id):
-            t = req_result.custom_id
+            t = _decode_custom_id(req_result.custom_id)
             conn.execute("""
                 INSERT OR IGNORE INTO companies
                 (ticker, name, cohort_id, first_seen_in_universe, is_active)
@@ -402,7 +443,7 @@ def collect_batch(batch_id: str, conn, config: dict, dry_run: bool = False) -> d
 
     try:
         for result in client.beta.messages.batches.results(batch_id):
-            ticker = result.custom_id
+            ticker = _decode_custom_id(result.custom_id)
 
             if result.result.type == "error":
                 logger.warning(f"{ticker}: batch result error — {result.result.error}")

@@ -552,6 +552,23 @@ def test_under_followed_lane_boost():
     assert "under_followed" not in no_signal["lanes"]
 
 
+def test_custom_id_roundtrip():
+    """custom_id muss API-Pattern erfüllen und verlustfrei zum Ticker zurück."""
+    import re
+    from analysis.batch_analyzer import _encode_custom_id, _decode_custom_id
+
+    pattern = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
+    # US plain, US class share (Punkt), EU mit Exchange-Suffix, Bindestrich
+    for ticker in ["AAPL", "BRK.B", "ASML.AS", "SAP.DE", "NEM.DE", "BF-B", "RDS.A"]:
+        cid = _encode_custom_id(ticker)
+        assert pattern.match(cid), f"custom_id verletzt API-Pattern: {cid!r} ({ticker})"
+        assert _decode_custom_id(cid) == ticker, f"Roundtrip kaputt für {ticker}: {cid}"
+
+    # Eindeutigkeit bleibt erhalten (Bijektion): ähnliche Symbole kollidieren nicht
+    assert _encode_custom_id("A.B") != _encode_custom_id("A-B")
+    print("✓ custom_id encode/decode roundtrip + API-Pattern")
+
+
 def test_deep_dive_parse_response():
     """JSON-Block + Markdown-Report werden sauber getrennt."""
     from analysis.deep_dive import _parse_response
