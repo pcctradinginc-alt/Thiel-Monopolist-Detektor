@@ -23,8 +23,12 @@ import requests
 
 logger = logging.getLogger(__name__)
 
-# EU-Ticker tragen ein Exchange-Suffix (z.B. SAP.DE, ASML.AS)
-_EU_SUFFIXES = (".DE", ".SW", ".AS", ".PA", ".ST", ".HE", ".CO", ".OL", ".BR", ".VI")
+# EU-Ticker tragen ein Exchange-Suffix (z.B. SAP.DE, ASML.AS). Muss mit der
+# Börsen-Map der EU-Pipeline übereinstimmen (eodhd_universe.EXCHANGE_MAP +
+# ipo_monitor) — sonst werden europäische Werte (v.a. London-Linien wie
+# 0EBQ.L) als US gezählt und die "keine EU-Firmen"-Warnung feuert fälschlich.
+_EU_SUFFIXES = (".DE", ".SW", ".AS", ".PA", ".ST", ".HE", ".CO", ".OL",
+                ".BR", ".VI", ".L", ".MI", ".MC", ".IR")
 
 
 def _is_eu_ticker(ticker: str) -> bool:
