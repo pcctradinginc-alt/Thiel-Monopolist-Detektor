@@ -312,9 +312,14 @@ def build_batch_request(ticker: str, filing_data: dict, model: str) -> dict:
         "custom_id": _encode_custom_id(ticker),
         "params": {
             "model": model,
-            # Schema-konforme Antworten brauchen ~600-900 Tokens; der Deckel
-            # verhindert nur Ausreißer (Output ist der teuerste Token-Posten)
-            "max_tokens": 2000,
+            # WICHTIG: nicht wieder senken. Mit 2000 wurde der Output regelmäßig
+            # mitten im JSON abgeschnitten (Truncation bei ~1700-2150 Tokens) —
+            # ein ganzer Wochenlauf verlor so 59/693 Auswertungen. Die scores
+            # stehen im Schema hinter allen Kriterien, d.h. Abbruch killt genau
+            # den monopoly_score → unrettbar. Vollständige verbose Antworten
+            # brauchen ~3000 Tokens; 4000 gibt Puffer. Kosten steigen kaum:
+            # abgeschnittene Antworten kosteten ohnehin ~2000 Tokens für nichts.
+            "max_tokens": 4000,
             "messages": [{
                 "role": "user",
                 "content": [
