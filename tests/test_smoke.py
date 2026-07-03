@@ -619,3 +619,46 @@ def test_deep_dive_candidate_trigger():
         conn.execute("INSERT INTO deep_dives (ticker, created_at, recommendation) "
                      "VALUES ('HIT', ?, 'KAUFEN')", (now,))
         assert find_deep_dive_candidates(conn, {}) == []
+
+
+def test_eodhd_eu_filter_foreign_and_iob():
+    """EODHD-EU-Filter: Nicht-EU-ISINs + LSE-IOB-Zweitlistings raus, ISIN-Dedupe über Börsen."""
+    from unittest.mock import patch, MagicMock
+    from universe import eodhd_universe
+
+    payload_by_exchange = {
+        # Heimatbörse zuerst in EXCHANGE_MAP → gewinnt Dedupe gegen LSE
+        "XETRA": [
+            {"Code": "DB1", "Name": "Deutsche Boerse AG", "Isin": "DE0005810055"},
+        ],
+        "WAR": [
+            {"Code": "ALE", "Name": "Allegro.eu SA", "Isin": "LU2237380790"},
+        ],
+        "LSE": [
+            {"Code": "0HCI", "Name": "Alibaba Group Holding Ltd ADR", "Isin": "US01609W1027"},
+            {"Code": "0H3T", "Name": "Deutsche Boerse AG", "Isin": "DE0005810055"},
+            {"Code": "0XYZ", "Name": "Mystery Corp", "Isin": ""},
+            {"Code": "RMV", "Name": "Rightmove PLC", "Isin": "GB00BGDT3G23"},
+        ],
+    }
+
+    def fake_get(url, params=None, timeout=None):
+        resp = MagicMock()
+        code = url.rstrip("/").rsplit("/", 1)[-1]
+        resp.status_code = 200
+        resp.json.return_value = payload_by_exchange.get(code, [])
+        return resp
+
+    with patch.object(eodhd_universe.requests, "get", side_effect=fake_get), \
+         patch.object(eodhd_universe.time, "sleep"):
+        companies = eodhd_universe.fetch_eodhd_eu_universe(api_key="test")
+
+    tickers = {c["ticker"] for c in companies}
+    assert "DB1.DE" in tickers            # Heimatlisting bleibt
+    assert "ALE.WA" in tickers            # Warschau wird abgedeckt
+    assert "RMV.L" in tickers             # echtes UK-Listing bleibt
+    assert "0HCI.L" not in tickers        # US-ISIN → US-Pipeline, nicht EU-Quote
+    assert "0H3T.L" not in tickers        # IOB-Dupe: XETRA-Listing gewinnt
+    assert "0XYZ.L" not in tickers        # IOB ohne ISIN → raus
+    ale = next(c for c in companies if c["ticker"] == "ALE.WA")
+    assert ale["country"] == "PL" and ale["cohort_id"] == "eu_gpw"

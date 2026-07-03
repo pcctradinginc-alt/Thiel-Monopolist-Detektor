@@ -107,8 +107,13 @@ eu_universe:
     - lse      # London Stock Exchange (GB): Filings via Companies House
     - milan    # Borsa Italiana (IT): Hidden Champions + regulatorische Monopole
     - madrid   # Bolsa de Madrid (ES): Amadeus, Aena, Viscofan etc.
+    - gpw      # GPW Warschau (PL): Allegro, Dino, Text SA — via EODHD
   min_market_cap_m: 50            # Small Caps einschließen (€50M+)
   ipo_months_back: 18             # EU-IPOs der letzten N Monate screenen
+  # Anteil des LLM-Call-Budgets für EU. Erhöht auf 0.35: EU-Titel haben kaum
+  # Analystenabdeckung (= mehr unentdeckte Monopolisten pro Call), und nach
+  # dem IOB-Filter fließt die Quote erstmals in echte EU-Heimatlistings.
+  quota_share: 0.35
 
 screening:
   model_screening: "claude-haiku-4-5-20251001"

@@ -313,6 +313,18 @@ MILAN_SEEDS = [
     ("DAL", "Datalogic SpA"),
 ]
 
+# GPW Warschau — größter CEE-Markt, analytisch kaum abgedeckt
+WARSAW_SEEDS = [
+    ("ALE", "Allegro.eu SA"),          # Dominanter Marketplace PL/CEE, Netzwerkeffekte
+    ("DNP", "Dino Polska SA"),         # Ländliche Discounter-Dichte, regionales Quasi-Monopol
+    ("TXT", "Text SA"),                # LiveChat — SaaS mit globaler Nische
+    ("CDR", "CD Projekt SA"),          # IP-Monopol (Witcher/Cyberpunk)
+    ("ACP", "Asseco Poland SA"),       # Behörden-/Banken-IT, tiefer Lock-in
+    ("KRU", "Kruk SA"),                # Forderungsmanagement CEE-Marktführer
+    ("PLW", "PlayWay SA"),             # Games-Publishing-Plattform
+    ("XTB", "XTB SA"),                 # Retail-Broker CEE
+]
+
 # Bolsa de Madrid — Infrastruktur-Monopole + Hidden Champions
 MADRID_SEEDS = [
     ("AMS", "Amadeus IT Group SA"),    # GDS-Oligopol, massiver Lock-in
@@ -346,6 +358,12 @@ EXCHANGES = {
         "seeds": MADRID_SEEDS,
         "min_market_cap_m": 50,
         "country": "ES",
+    },
+    "gpw": {
+        "suffix": ".WA",
+        "seeds": WARSAW_SEEDS,
+        "min_market_cap_m": 50,
+        "country": "PL",
     },
     "xetra": {
         "suffix": ".DE",

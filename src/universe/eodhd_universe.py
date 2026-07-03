@@ -14,6 +14,7 @@ Cost: 10 API calls/week (one per exchange, cached in DB).
 
 import logging
 import os
+import re
 import time
 
 import requests
@@ -23,6 +24,8 @@ logger = logging.getLogger(__name__)
 EODHD_BASE = "https://eodhd.com/api"
 
 # EODHD exchange code → (exchange_id, yfinance_suffix, country)
+# Reihenfolge = Dedupe-Priorität: Heimatbörsen zuerst, LSE zuletzt —
+# bei Doppellistings gewinnt das Heimatlisting (bessere Filing-Quellen).
 EXCHANGE_MAP = {
     "XETRA": ("xetra",  ".DE", "DE"),
     "SW":    ("six",    ".SW", "CH"),
@@ -34,10 +37,25 @@ EXCHANGE_MAP = {
     "OL":    ("ose",    ".OL", "NO"),
     "BR":    ("bru",    ".BR", "BE"),
     "VI":    ("vienna", ".VI", "AT"),
-    "LSE":   ("lse",    ".L",  "GB"),
+    "WAR":   ("gpw",    ".WA", "PL"),
     "MI":    ("milan",  ".MI", "IT"),
     "MC":    ("madrid", ".MC", "ES"),
+    "LSE":   ("lse",    ".L",  "GB"),
 }
+
+# ISIN-Länderpräfixe europäischer Emittenten (inkl. Kanalinseln/IoM als
+# übliche UK-Holding-Domizile). Nicht-europäische ISINs (US, CN, KY, ...)
+# sind Zweitlistings — deren Analyse gehört in die US-Pipeline.
+EUROPEAN_ISIN_PREFIXES = {
+    "AT", "BE", "BG", "CH", "CY", "CZ", "DE", "DK", "EE", "ES", "FI",
+    "FR", "GB", "GG", "GI", "GR", "HR", "HU", "IE", "IM", "IS", "IT",
+    "JE", "LI", "LT", "LU", "LV", "MT", "NL", "NO", "PL", "PT", "RO",
+    "SE", "SI", "SK",
+}
+
+# LSE International Order Book: Zweitlistings ausländischer Firmen
+# (Alibaba=0HCI, Datadog=0A3O, Boeing=0BOE ...) tragen Ticker der Form 0XXX.
+_LSE_IOB_PATTERN = re.compile(r"^0[A-Z0-9]{2,4}$")
 
 # Noise filter: names that indicate non-stocks
 NOISE_KEYWORDS = [
@@ -60,6 +78,9 @@ def fetch_eodhd_eu_universe(api_key: str = None) -> list[dict]:
 
     companies = []
     seen = set()
+    seen_isins = set()
+    skipped_foreign = 0
+    skipped_iob = 0
 
     for eodhd_code, (exchange_id, suffix, country) in EXCHANGE_MAP.items():
         try:
@@ -93,10 +114,31 @@ def fetch_eodhd_eu_universe(api_key: str = None) -> list[dict]:
                 if any(kw in name_lower for kw in NOISE_KEYWORDS):
                     continue
 
+                # Nur europäische Emittenten: Nicht-EU-ISINs (US/CN/KY...)
+                # sind Zweitlistings und haben die EU-Quote bisher komplett
+                # aufgefressen (100% der EU-Evaluationen waren IOB-Ticker).
+                if isin and isin[:2].upper() not in EUROPEAN_ISIN_PREFIXES:
+                    skipped_foreign += 1
+                    continue
+
+                # LSE IOB-Zweitlistings (0XXX) raus — auch bei europäischer
+                # ISIN existiert ein Heimatlisting mit besseren Filing-Quellen.
+                # Ohne ISIN ist Herkunft unklar → IOB-Muster entscheidet.
+                if eodhd_code == "LSE" and _LSE_IOB_PATTERN.match(base_ticker):
+                    skipped_iob += 1
+                    continue
+
                 full_ticker = f"{base_ticker}{suffix}"
                 if full_ticker in seen:
                     continue
                 seen.add(full_ticker)
+
+                # Dedupe über Börsen hinweg: Heimatbörse (frühere Map-Position)
+                # gewinnt gegen spätere Zweitlistings derselben ISIN.
+                if isin:
+                    if isin in seen_isins:
+                        continue
+                    seen_isins.add(isin)
 
                 companies.append({
                     "ticker": full_ticker,
@@ -117,5 +159,8 @@ def fetch_eodhd_eu_universe(api_key: str = None) -> list[dict]:
         except Exception as e:
             logger.error(f"EODHD {eodhd_code} fetch failed: {e}")
 
-    logger.info(f"EODHD EU universe: {len(companies)} Aktien über {len(EXCHANGE_MAP)} Börsen")
+    logger.info(
+        f"EODHD EU universe: {len(companies)} Aktien über {len(EXCHANGE_MAP)} Börsen "
+        f"(gefiltert: {skipped_foreign} Nicht-EU-ISINs, {skipped_iob} LSE-IOB-Zweitlistings)"
+    )
     return companies

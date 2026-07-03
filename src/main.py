@@ -795,7 +795,8 @@ def main():
         # EU-Quote: fester Anteil des Call-Budgets. Ohne Quote stehen EU-Titel
         # hinter 7000+ US-Titeln an und erreichen das Budget nie (0 EU-
         # Evaluationen in allen bisherigen Runs). Unbenutzte EU-Slots gehen an US.
-        eu_quota = min(int(max_calls * 0.25), len(eu_universe)) if eu_universe else 0
+        eu_share = config.get("eu_universe", {}).get("quota_share", 0.25)
+        eu_quota = min(int(max_calls * eu_share), len(eu_universe)) if eu_universe else 0
 
         # Rotation auf beide Pools anwenden (3x Budget als Puffer, weil
         # dq-/Lane-Filter einen Teil der Queue verwerfen)
