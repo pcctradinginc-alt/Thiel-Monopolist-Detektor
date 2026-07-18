@@ -35,12 +35,72 @@ def _is_eu_ticker(ticker: str) -> bool:
     return ticker.upper().endswith(_EU_SUFFIXES)
 
 
+# Keywords, die auf ein REGULATORISCHES statt kompetitives Monopol hindeuten
+# (Gebietsmonopol per Gesetz/Konzession, GSE-Charter, preisregulierter
+# Versorger, ...). Der reine monopoly_score des LLM kann solche Fälle nicht
+# von echten Moats (proprietäre Technologie, Netzwerkeffekte) unterscheiden —
+# case-insensitive Substring-Match auf evaluation_summary + monopoly_score_reasoning.
+_REGULATORY_MARKERS = [
+    "regulatory monopoly", "government-mandated", "government mandated",
+    "congressionally-mandated", "congressionally mandated", "rate-regulated",
+    "rate regulated", "regulated utility", "statutory", "gse charter",
+    "federal charter", "government utility", "regulatory moat",
+]
+
+
+def _is_regulatory_monopoly(assessment: dict) -> bool:
+    """Case-insensitive Substring-Match auf evaluation_summary + Reasoning."""
+    assessment = assessment or {}
+    scores = assessment.get("scores") or {}
+    text = (
+        (assessment.get("evaluation_summary") or "")
+        + " "
+        + (scores.get("monopoly_score_reasoning") or "")
+    ).lower()
+    return any(marker in text for marker in _REGULATORY_MARKERS)
+
+
+def _compute_thiel_score(assessment: dict, monopoly_score: int) -> float:
+    """
+    Komposit-Score aus den vier LLM-Subscores (gewichtet), statt dem rohen
+    monopoly_score, der regulatorische Monopole (Versorger, GSEs) systematisch
+    überbewertet. Zusätzlich: Regulatorik-Penalty (halbiert), wenn Summary/
+    Reasoning auf ein gesetzliches statt kompetitives Monopol hindeuten.
+    """
+    assessment = assessment or {}
+    criteria = assessment.get("criteria") or {}
+
+    def _sub(key: str) -> float:
+        entry = criteria.get(key)
+        if not isinstance(entry, dict):
+            return 0.0
+        try:
+            return float(entry.get("score") or 0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    moat_score = (
+        0.35 * _sub("proprietary_technology")
+        + 0.30 * _sub("network_effects")
+        + 0.25 * _sub("economies_of_scale")
+        + 0.10 * _sub("branding")
+    )
+
+    if _is_regulatory_monopoly(assessment):
+        moat_score *= 0.5
+
+    return moat_score
+
+
 def _fetch_top_candidates(conn, top_n: int = 15, days_back: int = 8) -> list[dict]:
     """
     Top-Kandidaten der letzten Woche aus company_status + jüngster Evaluation.
-    Sortiert nach monopoly_score, bei Gleichstand nach confidence_score.
+    Holt einen breiteren Kandidatenpool (top_n*4, grob nach monopoly_score
+    vorsortiert) und re-rankt dann in Python nach Thiel-Score (gewichtete
+    Subscores, Regulatorik-Monopole abgewertet) — siehe _compute_thiel_score.
     """
     cutoff = (datetime.now(timezone.utc) - timedelta(days=days_back)).isoformat()
+    pool_size = top_n * 4
     rows = conn.execute("""
         SELECT cs.ticker, cs.monopoly_score, cs.confidence_score,
                cs.data_quality_score, cs.current_status,
@@ -53,13 +113,14 @@ def _fetch_top_candidates(conn, top_n: int = 15, days_back: int = 8) -> list[dic
           AND cs.monopoly_score IS NOT NULL
         ORDER BY cs.monopoly_score DESC, cs.confidence_score DESC
         LIMIT ?
-    """, (cutoff, top_n)).fetchall()
+    """, (cutoff, pool_size)).fetchall()
 
     candidates = []
     for row in rows:
         r = dict(row)
         summary = ""
         narrow_market = ""
+        assessment = {}
         try:
             assessment = json.loads(r.get("llm_assessment") or "{}")
             summary = assessment.get("evaluation_summary", "") or ""
@@ -69,19 +130,32 @@ def _fetch_top_candidates(conn, top_n: int = 15, days_back: int = 8) -> list[dic
                 narrow_market = hyps[0].get("narrow_market", "") or ""
         except Exception:
             pass
+
+        monopoly_score = r.get("monopoly_score") or 0
+        confidence_score = r.get("confidence_score") or 0
+        thiel_score = _compute_thiel_score(assessment, monopoly_score)
+        regulatory_flagged = _is_regulatory_monopoly(assessment)
+
         candidates.append({
             "ticker": r["ticker"],
             "region": "EU" if _is_eu_ticker(r["ticker"]) else "US",
-            "monopoly_score": r.get("monopoly_score") or 0,
-            "confidence_score": r.get("confidence_score") or 0,
+            "monopoly_score": monopoly_score,
+            "confidence_score": confidence_score,
             "data_quality_score": r.get("data_quality_score") or 0,
             "status": r.get("current_status") or "NONE",
             "consecutive_runs": r.get("consecutive_high_score_runs") or 0,
             "alert_type": r.get("last_alert_type"),
             "summary": summary,
             "narrow_market": narrow_market,
+            "thiel_score": round(thiel_score, 1),
+            "regulatory_flagged": regulatory_flagged,
         })
-    return candidates
+
+    candidates.sort(
+        key=lambda c: (c["thiel_score"], c["monopoly_score"], c["confidence_score"]),
+        reverse=True,
+    )
+    return candidates[:top_n]
 
 
 def _enrich_with_entry_signals(candidates: list[dict]) -> None:
@@ -137,11 +211,12 @@ def build_report_markdown(candidates: list[dict],
         "",
         f"Top {len(candidates)} Monopol-Kandidaten dieser Woche "
         f"({len(candidates) - eu_count} US, {eu_count} EU), "
-        "sortiert nach Monopoly-Score. Kein Kandidat ist eine Kaufempfehlung — "
+        "sortiert nach Thiel-Score (gewichtete Subscores, Regulatorik-Monopole "
+        "abgewertet). Kein Kandidat ist eine Kaufempfehlung — "
         "die Liste priorisiert, was eine menschliche Tiefenanalyse verdient.",
         "",
-        "| # | Ticker | Region | Mono | Runs≥65 | Status | Preis | Δ52wH | P/S | Einstufung |",
-        "|---|--------|--------|------|---------|--------|-------|-------|-----|------------|",
+        "| # | Ticker | Region | Mono | Thiel | Runs≥65 | Status | Preis | Δ52wH | P/S | Einstufung |",
+        "|---|--------|--------|------|-------|---------|--------|-------|-------|-----|------------|",
     ]
     for i, c in enumerate(candidates, 1):
         e = c.get("entry", {})
@@ -150,6 +225,7 @@ def build_report_markdown(candidates: list[dict],
         ps = e.get("ps_ratio")
         lines.append(
             f"| {i} | **{c['ticker']}** | {c['region']} | {c['monopoly_score']} "
+            f"| {c['thiel_score']} "
             f"| {c['consecutive_runs']} | {c['status']} "
             f"| {price if price is not None else '—'} "
             f"| {f'-{dd}%' if dd is not None else '—'} "
@@ -179,7 +255,8 @@ def build_report_markdown(candidates: list[dict],
         market = f" — *Enger Markt: {c['narrow_market']}*" if c["narrow_market"] else ""
         entry_reason = c.get("entry", {}).get("reason", "")
         entry_note = f" — *Einstieg: {entry_reason}*" if entry_reason else ""
-        lines.append(f"{i}. **{c['ticker']}** ({c['region']}): {thesis}{market}{entry_note}")
+        reg_note = " ⚖️ (reguliert)" if c.get("regulatory_flagged") else ""
+        lines.append(f"{i}. **{c['ticker']}** ({c['region']}): {thesis}{market}{entry_note}{reg_note}")
 
     # Performance-Tracking: Hätten die bisherigen Signale Geld verdient?
     if open_signals:
@@ -247,12 +324,14 @@ def build_report_html(candidates: list[dict],
         cls   = e.get("classification", "WATCH")
         cls_color = _CLASS_COLORS.get(cls, "#86868b")
         mono  = c["monopoly_score"]
+        thiel = c["thiel_score"]
         rows += f"""
           <tr style="border-top:1px solid #f0f0f2;">
             <td style="padding:8px 6px; font-size:12px; color:#86868b;">{i}</td>
             <td style="padding:8px 6px; font-size:13px; font-weight:600; color:#1d1d1f;">{_esc(c['ticker'])}</td>
             <td style="padding:8px 6px; font-size:12px; color:#86868b;">{_esc(c['region'])}</td>
             <td style="padding:8px 6px; font-size:13px; font-weight:600; color:{_score_color(mono)};">{mono}</td>
+            <td style="padding:8px 6px; font-size:13px; font-weight:600; color:#3a3a3c;">{thiel}</td>
             <td style="padding:8px 6px; font-size:12px; color:#3a3a3c; text-align:center;">{c['consecutive_runs']}</td>
             <td style="padding:8px 6px; font-size:12px; color:#3a3a3c;">{_esc(c['status'])}</td>
             <td style="padding:8px 6px; font-size:12px; color:#3a3a3c;">{price if price is not None else '—'}</td>
@@ -280,6 +359,8 @@ def build_report_html(candidates: list[dict],
                        text-transform:uppercase; letter-spacing:0.04em;">Region</th>
             <th style="padding:0 6px 8px; font-size:10px; font-weight:600; color:#86868b;
                        text-transform:uppercase; letter-spacing:0.04em;">Mono</th>
+            <th style="padding:0 6px 8px; font-size:10px; font-weight:600; color:#86868b;
+                       text-transform:uppercase; letter-spacing:0.04em;">Thiel</th>
             <th style="padding:0 6px 8px; font-size:10px; font-weight:600; color:#86868b;
                        text-transform:uppercase; letter-spacing:0.04em; text-align:center;">Runs≥65</th>
             <th style="padding:0 6px 8px; font-size:10px; font-weight:600; color:#86868b;
@@ -340,10 +421,12 @@ def build_report_html(candidates: list[dict],
         entry_reason = c.get("entry", {}).get("reason", "")
         entry_note = (f' <span style="color:#86868b; font-style:italic;">— Einstieg: '
                       f'{_esc(entry_reason)}</span>') if entry_reason else ""
+        reg_note = (' <span style="color:#86868b;">⚖️ (reguliert)</span>'
+                    if c.get("regulatory_flagged") else "")
         theses += f"""
           <li style="margin:10px 0; font-size:13px; line-height:1.5; color:#1d1d1f;">
             <strong style="color:#0071e3;">{_esc(c['ticker'])}</strong>
-            ({_esc(c['region'])}): {thesis}{market}{entry_note}
+            ({_esc(c['region'])}): {thesis}{market}{entry_note}{reg_note}
           </li>"""
 
     theses_card = f"""
@@ -420,7 +503,8 @@ def build_report_html(candidates: list[dict],
 
     intro = (f"Top {len(candidates)} Monopol-Kandidaten dieser Woche "
              f"({len(candidates) - eu_count} US, {eu_count} EU), sortiert nach "
-             "Monopoly-Score. Kein Kandidat ist eine Kaufempfehlung — die Liste "
+             "Thiel-Score (gewichtete Subscores, Regulatorik-Monopole abgewertet). "
+             "Kein Kandidat ist eine Kaufempfehlung — die Liste "
              "priorisiert, was eine menschliche Tiefenanalyse verdient.")
 
     return f"""<!DOCTYPE html>

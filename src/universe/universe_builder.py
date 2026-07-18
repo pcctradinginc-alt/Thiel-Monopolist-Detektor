@@ -216,6 +216,34 @@ def build_universe(config: dict, conn) -> list[dict]:
 
     logger.info(f"Universe size: {len(unique_tickers)} unique tickers")
 
+    # Deduplicate by company-Name: Vorzugsaktien-/ETN-Serien desselben Emittenten
+    # (z.B. FMCC, FMCCG, FMCCK, ... 21 Ticker für Freddie Mac) tragen alle denselben
+    # `name`, sind aber praktisch derselbe Fall im Report. Pro Name nur EINEN
+    # Ticker behalten — den kürzesten (= i.d.R. die Common-Stock-Stammaktie),
+    # bei Gleichstand alphabetisch. Firmen ohne Namen werden nicht gruppiert.
+    by_name: dict[str, list[dict]] = {}
+    no_name: list[dict] = []
+    for t in unique_tickers:
+        name = (t.get("name") or "").strip()
+        if not name:
+            no_name.append(t)
+            continue
+        by_name.setdefault(name, []).append(t)
+
+    before_name_dedup = len(unique_tickers)
+    deduped_tickers = list(no_name)
+    for name, group in by_name.items():
+        if len(group) == 1:
+            deduped_tickers.append(group[0])
+            continue
+        survivor = min(group, key=lambda t: (len(t["ticker"]), t["ticker"]))
+        deduped_tickers.append(survivor)
+
+    dropped = before_name_dedup - len(deduped_tickers)
+    logger.info(f"Name-Dedup: {before_name_dedup}->{len(deduped_tickers)} Ticker "
+                f"({dropped} Vorzugs-/ETN-Serien entfernt)")
+    unique_tickers = deduped_tickers
+
     # Step 4: Upsert into DB
     now = datetime.now(timezone.utc).isoformat()
     for company in unique_tickers:
