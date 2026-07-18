@@ -384,11 +384,13 @@ def test_weekly_report_markdown():
         {"ticker": "FICO", "region": "US", "monopoly_score": 68,
          "confidence_score": 72, "data_quality_score": 68, "status": "PARTIAL",
          "consecutive_runs": 1, "alert_type": "HIDDEN_WEDGE_DETECTED",
-         "summary": "Credit-Score-Standard.", "narrow_market": "US-Kreditscoring"},
+         "summary": "Credit-Score-Standard.", "narrow_market": "US-Kreditscoring",
+         "thiel_score": 55.3, "regulatory_flagged": False},
         {"ticker": "NEM.DE", "region": "EU", "monopoly_score": 62,
          "confidence_score": 60, "data_quality_score": 55, "status": "PARTIAL",
          "consecutive_runs": 0, "alert_type": None,
-         "summary": "Laborsoftware-Nische.", "narrow_market": ""},
+         "summary": "Laborsoftware-Nische.", "narrow_market": "",
+         "thiel_score": 40.1, "regulatory_flagged": False},
     ]
     md = build_report_markdown(candidates)
     assert "FICO" in md and "NEM.DE" in md
@@ -662,3 +664,99 @@ def test_eodhd_eu_filter_foreign_and_iob():
     assert "0XYZ.L" not in tickers        # IOB ohne ISIN → raus
     ale = next(c for c in companies if c["ticker"] == "ALE.WA")
     assert ale["country"] == "PL" and ale["cohort_id"] == "eu_gpw"
+
+
+def test_compute_thiel_score_penalizes_regulatory_monopoly():
+    """
+    Regulatorik-Monopol (hoher monopoly_score, aber gesetzlich statt Moat-basiert)
+    muss im Thiel-Score UNTER einem echten Moat mit starken Subscores landen —
+    auch wenn der rohe monopoly_score identisch oder niedriger ist.
+    """
+    from alerts.weekly_report import _compute_thiel_score
+
+    regulatory_assessment = {
+        "criteria": {
+            "proprietary_technology": {"score": 20},
+            "network_effects": {"score": 10},
+            "economies_of_scale": {"score": 80},
+            "branding": {"score": 30},
+        },
+        "scores": {
+            "monopoly_score": 85,
+            "monopoly_score_reasoning": "This is a classic regulatory monopoly "
+                                         "granted via GSE charter and federal charter.",
+        },
+        "evaluation_summary": "Government-mandated market position, not a competitive moat.",
+    }
+    moat_assessment = {
+        "criteria": {
+            "proprietary_technology": {"score": 80},
+            "network_effects": {"score": 70},
+            "economies_of_scale": {"score": 40},
+            "branding": {"score": 50},
+        },
+        "scores": {
+            "monopoly_score": 70,
+            "monopoly_score_reasoning": "Strong proprietary technology and network effects.",
+        },
+        "evaluation_summary": "Durable competitive moat built on switching costs.",
+    }
+
+    regulatory_score = _compute_thiel_score(regulatory_assessment, 85)
+    moat_score = _compute_thiel_score(moat_assessment, 70)
+
+    assert moat_score > regulatory_score, (
+        f"Echter Moat ({moat_score}) muss über Regulatorik-Monopol "
+        f"({regulatory_score}) ranken, trotz niedrigerem monopoly_score"
+    )
+    # Sanity: Penalty tatsächlich angewendet (halbierter Moat-Score)
+    unpenalized = 0.35 * 20 + 0.30 * 10 + 0.25 * 80 + 0.10 * 30
+    assert regulatory_score == unpenalized * 0.5
+
+
+def test_compute_thiel_score_handles_missing_criteria():
+    """Fehlende/kaputte Subscores dürfen nicht crashen — Default 0."""
+    from alerts.weekly_report import _compute_thiel_score
+
+    assert _compute_thiel_score({}, 50) == 0.0
+    assert _compute_thiel_score({"criteria": {"proprietary_technology": "oops"}}, 50) == 0.0
+
+
+def test_universe_builder_name_dedup_collapses_preferred_series():
+    """
+    Fix: Vorzugsaktien-/ETN-Serien desselben Emittenten (z.B. 21 FMCC-Ticker)
+    dürfen nach dem Ticker-Dedup nicht mehr alle im Universe landen — pro Name
+    nur der kürzeste Ticker (Common-Stock-Stammaktie) bleibt übrig.
+    """
+    from unittest.mock import patch
+    from universe import universe_builder
+
+    fake_companies = [
+        {"ticker": "FMCC", "name": "FEDERAL HOME LOAN MORTGAGE CORP", "cik": "1"},
+        {"ticker": "FMCCG", "name": "FEDERAL HOME LOAN MORTGAGE CORP", "cik": "1"},
+        {"ticker": "FMCCK", "name": "FEDERAL HOME LOAN MORTGAGE CORP", "cik": "1"},
+        {"ticker": "FMCKI", "name": "FEDERAL HOME LOAN MORTGAGE CORP", "cik": "1"},
+        {"ticker": "AAPL", "name": "Apple Inc", "cik": "2"},
+        {"ticker": "SOLO", "name": "", "cik": "3"},  # kein Name → nicht gruppieren
+    ]
+    config = {"universe": {"cohorts": [
+        {"id": "broad_watch", "sic_codes": [], "min_market_cap_m": 0},
+    ]}}
+
+    class FakeConn:
+        def execute(self, *a, **kw):
+            class R:
+                def fetchone(self):
+                    return None
+                def fetchall(self):
+                    return []
+            return R()
+        def commit(self):
+            pass
+
+    with patch.object(universe_builder, "fetch_universe_via_edgar",
+                       return_value=fake_companies):
+        universe = universe_builder.build_universe(config, FakeConn())
+
+    tickers = {c["ticker"] for c in universe}
+    assert tickers == {"FMCC", "AAPL", "SOLO"}, tickers
